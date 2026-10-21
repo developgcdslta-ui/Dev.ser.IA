@@ -133,6 +133,7 @@
   var PREF_KEY = 'vigilia-zero.prefs.v1';
   var SAVE_KEY = 'vigilia-zero.partida.v1';
   var PROGRESS_KEY = 'vigilia-zero.progresso.v1';
+  var PROGRESS_BACKUP_KEY = 'vigilia-zero.progresso.backup.v1';
   function readJson(key) {
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
   }
@@ -142,12 +143,29 @@
   function removeKey(key) { try { localStorage.removeItem(key); } catch (e) {} }
   function emptyProgress() { return { versao: 1, reles: [false, false, false, false, false], protocolo: '' }; }
   var progressWritable = true;
+  function preserveCorruptProgress(raw) {
+    if (typeof raw !== 'string' || raw.length > 64 * 1024) return false;
+    try {
+      if (localStorage.getItem(PROGRESS_BACKUP_KEY) === null) {
+        localStorage.setItem(PROGRESS_BACKUP_KEY, raw);
+      }
+      return true;
+    } catch (e) { return false; }
+  }
   function loadProgress() {
     try {
       var raw = localStorage.getItem(PROGRESS_KEY);
       if (raw === null) return emptyProgress();
-      var data = JSON.parse(raw);
-      if (!data || data.versao !== 1 || !Array.isArray(data.reles)) {
+      var data;
+      try { data = JSON.parse(raw); } catch (e) {
+        progressWritable = preserveCorruptProgress(raw);
+        return emptyProgress();
+      }
+      if (!data || typeof data !== 'object' || !Array.isArray(data.reles)) {
+        progressWritable = preserveCorruptProgress(raw);
+        return emptyProgress();
+      }
+      if (data.versao !== 1) {
         progressWritable = false;
         return emptyProgress();
       }
@@ -174,10 +192,11 @@
   function loadPrefs() {
     var data = readJson(PREF_KEY);
     if (!data || data.versao !== 1) return { versao: 1, som: true, dificuldade: 1, melhorOnda: 0, melhorAbates: 0 };
+    var difficulty = Math.round(finiteNumber(data.dificuldade, 1, 0, 2));
     return {
       versao: 1,
       som: data.som !== false,
-      dificuldade: finiteNumber(data.dificuldade, 1, 0, 2),
+      dificuldade: difficulty,
       melhorOnda: finiteNumber(data.melhorOnda, 0, 0, 999),
       melhorAbates: finiteNumber(data.melhorAbates, 0, 0, 999999)
     };
@@ -306,7 +325,7 @@
     else if (name === 'dry') tone(85, 0.045, 'square', 0.015, 65);
   }
 
-  function buildTexture(kind) {
+  function buildTexture(kind, variant) {
     var tile = document.createElement('canvas');
     tile.width = 64; tile.height = 64;
     var t = tile.getContext('2d');
@@ -342,6 +361,21 @@
     } else {
       t.fillStyle = '#71807b'; t.fillRect(24, 52, 2, 5); t.fillRect(28, 52, 1, 5);
     }
+    if (kind === 1 && variant === 1) {
+      t.fillStyle = '#17262b'; t.fillRect(17, 21, 29, 20);
+      t.fillStyle = '#435b5a'; t.fillRect(19, 23, 25, 16);
+      t.fillStyle = '#81978b';
+      for (var vent = 0; vent < 4; vent++) t.fillRect(22, 25 + vent * 3, 19, 1);
+      t.fillStyle = '#b48a5a'; t.fillRect(9, 19, 3, 25); t.fillRect(52, 19, 3, 25);
+      t.fillStyle = '#d9a66c'; t.fillRect(14, 47, 36, 2);
+    } else if (kind === 1 && variant === 2) {
+      t.fillStyle = '#17262b'; t.fillRect(13, 13, 38, 36);
+      t.fillStyle = '#334a4b'; t.fillRect(15, 15, 34, 32);
+      t.fillStyle = '#91a69a'; t.fillRect(18, 18, 28, 2); t.fillRect(18, 43, 28, 2);
+      t.fillStyle = '#718783'; t.fillRect(21, 23, 3, 16); t.fillRect(27, 27, 3, 12);
+      t.fillRect(33, 20, 3, 19); t.fillRect(39, 25, 3, 14);
+      t.fillStyle = '#d08d55'; t.fillRect(8, 48, 48, 2);
+    }
     t.fillStyle = '#111c23'; t.fillRect(0, 0, 64, 3); t.fillRect(0, 61, 64, 3);
     t.fillStyle = '#687b78';
     for (var i = 0; i < 8; i++) {
@@ -350,7 +384,42 @@
     }
     return tile;
   }
-  var wallTextures = [buildTexture(1), buildTexture(2), buildTexture(3)];
+  function buildRelayTexture(index) {
+    var tile = document.createElement('canvas');
+    tile.width = 96; tile.height = 96;
+    var t = tile.getContext('2d');
+    var accent = ['#7bd4b0', '#e5ad67', '#8fc5de', '#d88868', '#c4a3de'][index];
+    t.scale(1.5, 1.5);
+    t.fillStyle = '#111e24'; t.fillRect(0, 0, 64, 64);
+    t.fillStyle = '#536761'; t.fillRect(4, 4, 56, 56);
+    t.fillStyle = '#1a2b30'; t.fillRect(6, 6, 52, 52);
+    t.fillStyle = accent; t.fillRect(8, 8, 48, 3);
+    t.fillStyle = '#0b151a'; t.fillRect(10, 14, 44, 31);
+    t.fillStyle = '#b7c8bb'; t.font = 'bold 6px monospace'; t.textAlign = 'left';
+    t.fillText('BOREAL / 09', 13, 21);
+    t.fillStyle = accent; t.font = 'bold 17px monospace';
+    t.fillText(String(index + 1).padStart(2, '0'), 13, 39);
+    t.fillStyle = '#405957'; t.fillRect(33, 26, 17, 16);
+    t.strokeStyle = accent; t.lineWidth = 1;
+    t.beginPath(); t.moveTo(34, 38); t.lineTo(37, 35); t.lineTo(40, 37);
+    t.lineTo(43, 31); t.lineTo(47, 34); t.lineTo(50, 29); t.stroke();
+    t.fillStyle = accent; t.fillRect(12, 48, 4, 4); t.fillRect(19, 48, 4, 4);
+    t.fillStyle = '#9fb0a4'; t.font = 'bold 5px monospace';
+    t.fillText(index < 2 ? 'AUXILIAR' : index < 4 ? 'ENERGIA' : 'FAROL', 26, 53);
+    t.fillStyle = '#273a3d'; t.fillRect(8, 56, 48, 2);
+    t.fillStyle = accent; t.fillRect(8, 58, 10 + index * 4, 2);
+    return tile;
+  }
+  var wallTextures = [
+    [buildTexture(1), buildTexture(1, 1), buildTexture(1, 2)],
+    [buildTexture(2)], [buildTexture(3)]
+  ];
+  var relayCellIndex = new Uint8Array(MAP.length * MAP[0].length), relayTextures = [];
+  for (var relayTextureIndex = 0; relayTextureIndex < relays.length; relayTextureIndex++) {
+    var relayTexture = relays[relayTextureIndex];
+    relayCellIndex[relayTexture.row * MAP[0].length + relayTexture.col] = relayTextureIndex + 1;
+    relayTextures.push(buildRelayTexture(relayTextureIndex));
+  }
   for (var di = 0; di < 26; di++) {
     dust.push({ x: random() * W, y: random() * H, speed: 3 + random() * 8, phase: random() * 6.28, size: 0.5 + random() * 1.2 });
   }
@@ -410,8 +479,8 @@
     return found;
   }
   function discoverTransmission(waveNumber) {
-    for (var i = 0; i < transmissions.length; i++) {
-      if (transmissions[i].wave === waveNumber) {
+    for (var i = 0; i < storyChapters.length; i++) {
+      if (storyChapters[i].wave === waveNumber) {
         activeTransmission = i; transmissionTimer = 7;
         return;
       }
@@ -490,7 +559,7 @@
         wave: wave, kills: kills, seconds: seconds, spawnLeft: spawnLeft, spawnTimer: spawnTimer,
         waveDelay: waveDelay, bannerTimer: bannerTimer, rng: rng,
         enemies: enemies, pickups: pickups, sparks: sparks, message: message, messageTimer: messageTimer,
-        transmissionWave: activeTransmission >= 0 ? transmissions[activeTransmission].wave : 0,
+        transmissionWave: activeTransmission >= 0 ? storyChapters[activeTransmission].wave : 0,
         transmissionTimer: transmissionTimer, reles: progress.reles.slice(), protocolo: progress.protocolo
       };
       mode = 'jogando';
@@ -535,9 +604,9 @@
     };
     wave = finiteNumber(data.wave, 1, 1, 999); kills = finiteNumber(data.kills, 0, 0, 999999);
     activeTransmission = -1;
-    var savedTransmissionWave = finiteNumber(data.transmissionWave, 0, 0, 12);
-    for (var ti = 0; ti < transmissions.length; ti++) {
-      if (transmissions[ti].wave === savedTransmissionWave && transmissions[ti].wave <= wave) activeTransmission = ti;
+    var savedTransmissionWave = finiteNumber(data.transmissionWave, 0, 0, 21);
+    for (var ti = 0; ti < storyChapters.length; ti++) {
+      if (storyChapters[ti].wave === savedTransmissionWave && storyChapters[ti].wave <= wave) activeTransmission = ti;
     }
     transmissionTimer = activeTransmission >= 0 ? finiteNumber(data.transmissionTimer, 0, 0, 7) : 0;
     seconds = finiteNumber(data.seconds, 0, 0, 1e8); spawnLeft = finiteNumber(data.spawnLeft, 0, 0, 20);
@@ -645,9 +714,12 @@
       zBuffer[col] = distance;
       var height = Math.min(H * 3, focal / distance);
       var top = horizon - height * 0.5, screenX = col * STRIP;
-      var texture = wallTextures[hit.tile - 1] || wallTextures[0];
-      var texX = Math.max(0, Math.min(63, Math.floor(hit.u * 64)));
-      ctx.drawImage(texture, texX, 0, 1, 64, screenX, top, STRIP + 1, height);
+      var relayAtWall = relayCellIndex[hit.row * MAP[0].length + hit.col] - 1;
+      var variants = wallTextures[hit.tile - 1] || wallTextures[0];
+      var texture = relayAtWall >= 0 ? relayTextures[relayAtWall] :
+        variants[hit.tile === 1 ? (hit.row * 7 + hit.col * 11) % variants.length : 0];
+      var texX = Math.max(0, Math.min(texture.width - 1, Math.floor(hit.u * texture.width)));
+      ctx.drawImage(texture, texX, 0, 1, texture.height, screenX, top, STRIP + 1, height);
       var shade = Math.min(0.82, distance * 0.045 + (hit.side ? 0.12 : 0));
       if (shade > 0.02) {
         ctx.globalAlpha = shade; ctx.fillStyle = '#061017'; ctx.fillRect(screenX, top, STRIP + 1, height); ctx.globalAlpha = 1;
@@ -668,14 +740,17 @@
       var mark = floorMarks[i], dx = mark.x - player.x, dy = mark.y - player.y;
       var angle = normalizeAngle(Math.atan2(dy, dx) - player.yaw), distance = Math.hypot(dx, dy);
       if (distance < 0.25 || Math.abs(angle) > FOV * 0.54) continue;
+      var depth = distance * Math.cos(angle);
+      if (depth < 0.15) continue;
       var screenX = W * 0.5 + Math.tan(angle) * camera.focal;
-      if (screenX < -5 || screenX > W + 5) continue;
-      var column = Math.max(0, Math.min(COLS - 1, Math.floor(screenX / STRIP)));
-      if (zBuffer[column] < distance - 0.12) continue;
-      var size = camera.focal * mark.length / distance;
+      var size = camera.focal * mark.length / depth;
       if (size < 1) continue;
-      var screenY = camera.horizon + camera.focal * 0.44 / distance;
-      ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(mark.angle - player.yaw);
+      var halfWidth = size * 0.65;
+      if (screenX + halfWidth <= 0 || screenX - halfWidth >= W) continue;
+      var screenY = camera.horizon + camera.focal * 0.44 / depth;
+      ctx.save();
+      if (!clipVisibleColumns(screenX, halfWidth, depth, 0.12)) { ctx.restore(); continue; }
+      ctx.translate(screenX, screenY); ctx.rotate(mark.angle - player.yaw);
       ctx.globalAlpha = Math.max(0.08, 0.34 - distance * 0.025) * mark.variation;
       ctx.fillStyle = mark.type === 0 ? '#53625b' : mark.type === 1 ? '#101b1d' :
         mark.type === 4 ? '#485952' : mark.type === 5 ? '#68776b' : '#758277';
@@ -703,13 +778,15 @@
     var dx = e.x - player.x, dy = e.y - player.y;
     var angle = normalizeAngle(Math.atan2(dy, dx) - player.yaw), dist = e.renderDistance;
     if (Math.abs(angle) > FOV * 0.59 || dist < 0.15) return;
+    var depth = dist * Math.cos(angle);
+    if (depth < 0.15) return;
     var screenX = W * 0.5 + Math.tan(angle) * camera.focal;
-    var size = camera.focal / dist, height = size * 0.92, width = height * 0.56;
+    var size = camera.focal / depth, height = size * 0.92, width = height * 0.56;
     if (height < 2 || screenX + width * 0.5 <= 0 || screenX - width * 0.5 >= W) return;
     var foot = camera.horizon + size * 0.48;
     var top = foot - height, bob = Math.sin(seconds * 4 + e.phase) * Math.min(3, height * 0.04);
     ctx.save();
-    if (!clipVisibleColumns(screenX, width * 0.5, dist, 0.18)) { ctx.restore(); return; }
+    if (!clipVisibleColumns(screenX, width * 0.5, depth, 0.18)) { ctx.restore(); return; }
     ctx.translate(screenX, top + bob); ctx.scale(width / 44, height / 72);
     ctx.globalAlpha = Math.max(0.32, 1 - dist / 20);
     ctx.fillStyle = '#07100f'; ctx.beginPath(); ctx.ellipse(22, 71, 19, 4, 0, 0, Math.PI * 2); ctx.fill();
@@ -741,13 +818,15 @@
     var dx = item.x - player.x, dy = item.y - player.y;
     var angle = normalizeAngle(Math.atan2(dy, dx) - player.yaw), dist = item.renderDistance;
     if (Math.abs(angle) > FOV * 0.59 || dist < 0.15) return;
+    var depth = dist * Math.cos(angle);
+    if (depth < 0.15) return;
     var screenX = W * 0.5 + Math.tan(angle) * camera.focal;
-    var size = Math.max(5, Math.min(26, camera.focal / dist * 0.12));
+    var size = Math.max(5, Math.min(26, camera.focal / depth * 0.12));
     var halfWidth = size * 1.45;
     if (screenX + halfWidth <= 0 || screenX - halfWidth >= W) return;
-    var y = camera.horizon + camera.focal * 0.42 / dist - size * 0.6 + Math.sin(seconds * 2 + item.phase) * 2;
+    var y = camera.horizon + camera.focal * 0.42 / depth - size * 0.6 + Math.sin(seconds * 2 + item.phase) * 2;
     ctx.save();
-    if (!clipVisibleColumns(screenX, halfWidth, dist, 0.2)) { ctx.restore(); return; }
+    if (!clipVisibleColumns(screenX, halfWidth, depth, 0.2)) { ctx.restore(); return; }
     ctx.translate(screenX, y); ctx.rotate(seconds * 0.35 + item.phase);
     ctx.fillStyle = item.type === 'med' ? '#6fe2b0' : '#f1bd6b';
     ctx.globalAlpha = 0.23; ctx.beginPath(); ctx.arc(0, 0, size * 1.45, 0, Math.PI * 2); ctx.fill();
@@ -782,10 +861,12 @@
       var s = sparks[i], dx = s.x - player.x, dy = s.y - player.y;
       var angle = normalizeAngle(Math.atan2(dy, dx) - player.yaw), dist = Math.hypot(dx, dy);
       if (Math.abs(angle) > FOV * 0.53 || dist < 0.1) continue;
+      var depth = dist * Math.cos(angle);
+      if (depth < 0.1) continue;
       var sx = W / 2 + Math.tan(angle) * (W / (2 * Math.tan(FOV / 2)));
       var col = Math.max(0, Math.min(COLS - 1, Math.floor(sx / STRIP)));
-      if (zBuffer[col] < dist - 0.1) continue;
-      var sy = cameraState.horizon + cameraState.focal * 0.2 / dist;
+      if (zBuffer[col] < depth - 0.1) continue;
+      var sy = cameraState.horizon + cameraState.focal * 0.2 / depth;
       ctx.globalAlpha = Math.max(0, s.life / s.maxLife);
       ctx.fillStyle = s.color; ctx.fillRect(sx, sy, s.size, s.size);
     }
@@ -871,7 +952,7 @@
     ctx.fillText('CORRIDA', 14, 82, 48);
     ctx.fillStyle = '#20333a'; ctx.fillRect(66, 74, 30, 8);
     ctx.fillStyle = '#84d6af'; ctx.fillRect(66, 74, 30 * player.stamina / 100, 8);
-    if (bannerTimer > 0) {
+    if (bannerTimer > 0 && transmissionTimer <= 0) {
       ctx.globalAlpha = Math.min(1, bannerTimer, (2.8 - bannerTimer) * 2 + 0.35);
       ctx.fillStyle = '#071318c9'; ctx.fillRect(68, H * 0.25, W - 136, 42);
       ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 ' + uiFontSize(14) + 'px system-ui';
@@ -895,7 +976,7 @@
       ctx.fillText(relayHint, W / 2, H - 15, W - 124);
     }
     if (activeTransmission >= 0 && transmissionTimer > 0) {
-      var transmission = transmissions[activeTransmission], radioX = 8, radioY = 90, radioWidth = 204;
+      var transmission = storyChapters[activeTransmission], radioX = 8, radioY = 90, radioWidth = 204;
       var radioTitleSize = uiFontSize(12), radioLineSize = uiFontSize(13);
       var radioTitleY = radioY + radioTitleSize;
       var radioLine1Y = radioTitleY + radioLineSize + 2;
@@ -1019,13 +1100,9 @@
   function chooseProtocol() {
     var selected = protocolOptions[pause.protocolIndex], now = performance.now();
     if (pause.archiveConfirm === selected && now < pause.archiveConfirmUntil) {
-      var previous = progress.protocolo;
       progress.protocolo = selected;
       if (saveProgress()) pause.protocolStatus = 'PROTOCOLO REGISTRADO · O TURNO SEGUE';
-      else {
-        progress.protocolo = previous;
-        pause.protocolStatus = 'NÃO FOI POSSÍVEL SALVAR O REGISTRO';
-      }
+      else pause.protocolStatus = 'REGISTRO TEMPORÁRIO · NÃO FOI SALVO';
       pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
       pause.archiveLockUntil = now + 500; draw(); return;
     }
@@ -1178,13 +1255,8 @@
     }
     progress.reles[index] = true;
     var relaySaved = saveProgress();
-    if (!relaySaved) {
-      progress.reles[index] = false;
-      message = 'NÃO FOI POSSÍVEL SALVAR O RELÉ';
-    } else {
-      message = relay.label + ' SINCRONIZADO · ARQUIVO';
-      sound('pickup');
-    }
+    message = relay.label + (relaySaved ? ' SINCRONIZADO · ARQUIVO' : ' SINCRONIZADO · NÃO SALVO');
+    if (relaySaved) sound('pickup');
     messageTimer = 2.4;
     draw();
     return true;
