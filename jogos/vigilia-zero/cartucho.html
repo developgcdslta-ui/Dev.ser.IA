@@ -215,6 +215,7 @@
     waveDelay = 0; bannerTimer = 2.8; recoil = 0; flash = 0; damageFlash = 0;
     enemies.length = 0; pickups.length = 0; sparks.length = 0; sprites.length = 0;
     state = 'jogando'; pause.follow = false; pause.confirm = '';
+    ignoreAUntilRelease = !!held.a; gameOverLock = 0;
     removeKey(SAVE_KEY); createAudio(); syncAudio(); saveSessionState(); draw(); startLoop();
   }
   function unlockWeapons() {
@@ -262,11 +263,13 @@
     }
   }
   function finishGame() {
-    state = 'fim'; held = Object.create(null); leftAxis.x = 0; leftAxis.y = 0;
+    sound('damage');
+    state = 'fim'; gameOverLock = performance.now() + 500;
+    held = Object.create(null); leftAxis.x = 0; leftAxis.y = 0;
     ignoreAUntilRelease = false; stopLoop(); syncAudio();
     if (wave > prefs.melhorOnda) prefs.melhorOnda = wave;
     if (kills > prefs.melhorAbates) prefs.melhorAbates = kills;
-    savePrefs(); saveSessionState(); sound('damage'); draw();
+    savePrefs(); saveSessionState(); draw();
   }
   function saveSessionState() {
     var snapshot = null, mode = state;
@@ -523,7 +526,7 @@
       ctx.globalAlpha = 1;
     }
     ctx.restore();
-    if (player.reloading > 0) {
+    if (player.reloadTime > 0) {
       ctx.fillStyle = '#d3dfd7'; ctx.font = '700 14px system-ui'; ctx.textAlign = 'center';
       ctx.fillText('RECARREGANDO…', W / 2, H - 71);
     }
@@ -690,7 +693,9 @@
     ctx.setTransform(unit, 0, 0, unit, offsetX * pixelRatio, offsetY * pixelRatio);
     ctx.imageSmoothingEnabled = false;
     if (state === 'menu') drawMenu();
-    else if (player) {
+    else if (state === 'fim' && !player) {
+      drawMenuBackdrop(); drawEnd();
+    } else if (player) {
       renderGame();
       if (state === 'pausa') drawPause();
       else if (state === 'fim') drawEnd();
@@ -769,7 +774,7 @@
   }
   function closePause() {
     if (state !== 'pausa' || pause.follow) return;
-    state = 'jogando'; pause.confirm = ''; ignoreAUntilRelease = true;
+    state = 'jogando'; pause.confirm = ''; ignoreAUntilRelease = !!held.a;
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function choosePause() {
@@ -832,7 +837,7 @@
   var gameOverLock = 0;
   function closeFollowPause() {
     if (state !== 'pausa' || !pause.follow) return;
-    pause.follow = false; state = 'jogando'; ignoreAUntilRelease = true;
+    pause.follow = false; state = 'jogando'; ignoreAUntilRelease = !!held.a;
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function getMovement() {
@@ -947,7 +952,6 @@
   window.PulsyGame = {
     onButton: function (name, pressed) {
       try {
-        if (pressed) gameOverLock = state === 'fim' && !gameOverLock ? performance.now() + 500 : gameOverLock;
         button(String(name), !!pressed);
       } catch (e) {}
     },
