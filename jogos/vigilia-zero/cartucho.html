@@ -15,11 +15,16 @@
     align-items: end; padding: 7px; pointer-events: none; }
   .toque.visivel { display: flex; }
   .toque .cruz { display: grid; grid-template: repeat(3, 38px) / repeat(3, 38px); gap: 2px; }
-  .toque .acoes { display: grid; grid-template: repeat(2, 38px) / repeat(2, 38px); gap: 4px; }
+  .toque .acoes { display: grid; grid-template: repeat(3, 38px) / repeat(3, 38px); gap: 3px; }
   .toque button { pointer-events: auto; border: 1px solid #9cc2b9aa; border-radius: 12px;
     background: #101c23c9; color: #e6f2e9; font: 700 14px system-ui; touch-action: none; }
   .toque button[data-pulsy-button="a"] { border-color: #ffc46b; color: #ffc46b; }
   .toque .vazio { visibility: hidden; }
+  @media (max-height: 340px) {
+    .toque .cruz { grid-template: repeat(3, 30px) / repeat(3, 30px); }
+    .toque .acoes { grid-template: repeat(3, 30px) / repeat(3, 30px); gap: 2px; }
+    .toque button { border-radius: 9px; font-size: 12px; }
+  }
 </style>
 </head>
 <body>
@@ -31,8 +36,9 @@
     <span class="vazio"></span><button data-pulsy-button="down" aria-label="Recuar">▼</button><span class="vazio"></span>
   </div>
   <div class="acoes" aria-label="Ações">
-    <button data-pulsy-button="x" aria-label="Recarregar">REC</button><button data-pulsy-button="y" aria-label="Trocar arma">ARM</button>
-    <button data-pulsy-button="b" aria-label="Correr">CORRER</button><button data-pulsy-button="a" aria-label="Atirar">ATIRAR</button>
+    <button data-pulsy-button="l" aria-label="Arma anterior">L</button><button data-pulsy-button="x" aria-label="Recarregar">X</button><button data-pulsy-button="r" aria-label="Próxima arma">R</button>
+    <button data-pulsy-button="select" aria-label="Som">−</button><button data-pulsy-button="y" aria-label="Trocar arma">Y</button><button data-pulsy-button="start" aria-label="Pausar">+</button>
+    <button data-pulsy-button="b" aria-label="Correr">B</button><span class="vazio"></span><button data-pulsy-button="a" aria-label="Atirar">A</button>
   </div>
 </div>
 <script>
@@ -40,7 +46,7 @@
   'use strict';
 
   var W = 400, H = 360, STRIP = 2, COLS = W / STRIP, FOV = 1.12;
-  var canvas = document.getElementById('tela');
+  var canvas = document.getElementById('tela'), touch = document.getElementById('toque');
   var ctx = canvas.getContext('2d', { alpha: false });
   var scale = 1, offsetX = 0, offsetY = 0, pixelRatio = 1;
   var state = 'menu', player = null, wave = 0, kills = 0, seconds = 0;
@@ -48,6 +54,7 @@
   var enemies = [], pickups = [], sparks = [], sprites = [], dust = [];
   var zBuffer = new Float32Array(COLS), rayHit = { distance: 0, tile: 1, side: 0, u: 0 };
   var held = Object.create(null), leftAxis = { x: 0, y: 0 }, rightAxis = { x: 0, y: 0 };
+  var movementInput = { x: 0, y: 0 }, cameraState = { horizon: 0, focal: 0 };
   var ignoreAUntilRelease = false, rafId = 0, lastFrame = 0, rng = 8213907;
   var audio = null, recoil = 0, flash = 0, damageFlash = 0, message = '', messageTimer = 0;
   var pause = { option: 0, confirm: '', confirmUntil: 0, follow: false };
@@ -61,6 +68,9 @@
     smg: { mag: 28, reserve: 112, rate: 0.105, reload: 1.08, damage: 0.43, spread: 0.025, pellets: 1, tone: 135 },
     rifle: { mag: 20, reserve: 100, rate: 0.24, reload: 1.15, damage: 1.02, spread: 0.012, pellets: 1, tone: 110 }
   };
+  var weaponSleeve = [-50, -2, -35, -31, -13, -26, -2, 8, -39, 18];
+  var weaponBody = [4, -35, 23, -45, 39, -33, 37, 2, 15, 12, 0, -3];
+  var weaponTop = [-26, -47, 25, -52, 31, -23, 17, -12, -22, -17];
   var mapRows = [
     '1111111111111111', '1000000000000001', '1000100000010001', '1000100000010001',
     '1000000000000001', '1011001100110001', '1000000000000001', '1000000100000001',
@@ -76,7 +86,7 @@
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
   }
   function writeJson(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
   }
   function removeKey(key) { try { localStorage.removeItem(key); } catch (e) {} }
   function finiteNumber(value, fallback, min, max) {
@@ -287,7 +297,7 @@
       };
       mode = 'jogando';
     }
-    writeJson(SAVE_KEY, { versao: 1, modo: mode, jogo: snapshot, kills: kills, wave: wave });
+    return writeJson(SAVE_KEY, { versao: 1, modo: mode, jogo: snapshot, kills: kills, wave: wave });
   }
   function restoreGame(data) {
     if (!data || data.versao !== 1 || !data.jogador || !Array.isArray(data.enemies) ||
@@ -374,7 +384,7 @@
     var u = hitCoord - Math.floor(hitCoord);
     if ((side === 0 && rayX > 0) || (side === 1 && rayY < 0)) u = 1 - u;
     rayHit.distance = dist; rayHit.tile = mapY < 0 || mapY >= MAP.length || mapX < 0 || mapX >= MAP[0].length
-      ? 1 : Math.max(1, Number(MAP[mapY][mapX]) || 1);
+      ? 1 : Math.max(1, MAP[mapY][mapX].charCodeAt(0) - 48);
     rayHit.side = side; rayHit.u = u;
     return rayHit;
   }
@@ -423,7 +433,8 @@
         ctx.fillRect(screenX, top, 1, height); ctx.globalAlpha = 1;
       }
     }
-    return { horizon: horizon, focal: focal };
+    cameraState.horizon = horizon; cameraState.focal = focal;
+    return cameraState;
   }
   function drawCreature(e, camera) {
     var dx = e.x - player.x, dy = e.y - player.y;
@@ -501,10 +512,10 @@
     var spec = weaponSpecs[player.weapon], bob = Math.sin(player.bob) * 2.2;
     var kick = recoil * 18, x = W * 0.5, y = H + 11 + bob + kick;
     ctx.save(); ctx.translate(x, y);
-    ctx.fillStyle = '#5f746d'; polygon([-50, -2, -35, -31, -13, -26, -2, 8, -39, 18], '#33494a');
+    ctx.fillStyle = '#5f746d'; polygon(weaponSleeve, '#33494a');
     ctx.fillStyle = '#d1a87a'; ctx.fillRect(-34, -19, 17, 10);
-    ctx.fillStyle = '#263942'; polygon([4, -35, 23, -45, 39, -33, 37, 2, 15, 12, 0, -3], '#263942');
-    ctx.fillStyle = '#718883'; polygon([-26, -47, 25, -52, 31, -23, 17, -12, -22, -17], '#596e6d');
+    ctx.fillStyle = '#263942'; polygon(weaponBody, '#263942');
+    ctx.fillStyle = '#718883'; polygon(weaponTop, '#596e6d');
     ctx.fillStyle = '#26363b'; ctx.fillRect(-12, -57, 28, 20);
     if (player.weapon === 'shotgun') {
       ctx.fillStyle = '#17252c'; ctx.fillRect(-7, -73, 15, 21); ctx.fillRect(-2, -84, 5, 15);
@@ -561,15 +572,15 @@
     ctx.fillStyle = player.hp > 50 ? '#75d2a5' : player.hp > 25 ? '#e9b264' : '#e66f60';
     ctx.fillRect(W - 118, 32, 100 * player.hp / 100, 8);
     var stock = player.stocks[player.weapon];
-    ctx.fillStyle = '#08151acc'; ctx.fillRect(W - 142, H - 61, 134, 50);
+    ctx.fillStyle = '#08151acc'; ctx.fillRect(W - 142, 68, 134, 50);
     ctx.textAlign = 'right'; ctx.fillStyle = '#b7cbc0'; ctx.font = '700 11px system-ui';
-    ctx.fillText(weaponNames[player.weapon], W - 16, H - 43);
+    ctx.fillText(weaponNames[player.weapon], W - 16, 86);
     ctx.fillStyle = '#f0f4ed'; ctx.font = '700 22px system-ui';
-    ctx.fillText(String(stock.mag).padStart(2, '0') + ' / ' + stock.reserve, W - 16, H - 18);
-    ctx.textAlign = 'left'; ctx.fillStyle = '#08151acc'; ctx.fillRect(8, H - 30, 94, 20);
-    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 11px system-ui'; ctx.fillText('CORRIDA', 14, H - 16);
-    ctx.fillStyle = '#20333a'; ctx.fillRect(66, H - 24, 30, 8);
-    ctx.fillStyle = '#84d6af'; ctx.fillRect(66, H - 24, 30 * player.stamina / 100, 8);
+    ctx.fillText(String(stock.mag).padStart(2, '0') + ' / ' + stock.reserve, W - 16, 109);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 68, 94, 20);
+    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 11px system-ui'; ctx.fillText('CORRIDA', 14, 82);
+    ctx.fillStyle = '#20333a'; ctx.fillRect(66, 74, 30, 8);
+    ctx.fillStyle = '#84d6af'; ctx.fillRect(66, 74, 30 * player.stamina / 100, 8);
     if (bannerTimer > 0) {
       ctx.globalAlpha = Math.min(1, bannerTimer, (2.8 - bannerTimer) * 2 + 0.35);
       ctx.fillStyle = '#071318c9'; ctx.fillRect(68, H * 0.25, W - 136, 42);
@@ -667,12 +678,12 @@
         var label = pauseOptions[i];
         if (label === 'Som') label += ': ' + (prefs.som ? 'ligado' : 'desligado');
         if (pause.confirm === pauseOptions[i]) label = 'A DE NOVO PARA ' + (label === 'Menu' ? 'SAIR' : 'RECOMEÇAR');
-        drawText((pause.option === i ? '›  ' : '   ') + label, W / 2, 104 + i * 29, 15,
+        drawText((pause.option === i ? '›  ' : '   ') + label, W / 2, 112 + i * 25, 15,
           pause.option === i ? '#9be0be' : '#d8e3d9', 700);
       }
-      drawText('RECOMEÇAR E MENU PEDEM CONFIRMAÇÃO', W / 2, 263, 11, '#beaa86');
+      drawText('RECOMEÇAR E MENU PEDEM CONFIRMAÇÃO', W / 2, 237, 11, '#beaa86');
     }
-    drawText('↑↓ escolher  ·  A confirmar  ·  B/+ voltar  ·  − som', W / 2, H - 51, 11, '#a9bcb0');
+    drawText('↑↓ escolher  ·  A confirmar  ·  B/+ voltar  ·  − som', W / 2, 88, 11, '#a9bcb0');
     ctx.textAlign = 'left';
   }
   function drawEnd() {
@@ -687,6 +698,7 @@
     ctx.textAlign = 'left';
   }
   function draw() {
+    if (touch && !window.__pulsyConsole) touch.classList.toggle('visivel', state === 'jogando' || state === 'pausa');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#050b0f'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     var unit = scale * pixelRatio;
@@ -841,11 +853,13 @@
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function getMovement() {
-    if (Math.hypot(leftAxis.x, leftAxis.y) > 0.2) return { x: leftAxis.x, y: leftAxis.y };
-    return {
-      x: (held.right ? 1 : 0) - (held.left ? 1 : 0),
-      y: (held.down ? 1 : 0) - (held.up ? 1 : 0)
-    };
+    if (Math.hypot(leftAxis.x, leftAxis.y) > 0.2) {
+      movementInput.x = leftAxis.x; movementInput.y = leftAxis.y;
+    } else {
+      movementInput.x = (held.right ? 1 : 0) - (held.left ? 1 : 0);
+      movementInput.y = (held.down ? 1 : 0) - (held.up ? 1 : 0);
+    }
+    return movementInput;
   }
   function update(dt) {
     seconds += dt;
@@ -899,7 +913,7 @@
       var e = enemies[i], vx = player.x - e.x, vy = player.y - e.y, distance = Math.hypot(vx, vy);
       e.hurt = Math.max(0, e.hurt - dt);
       if (distance > 0.56) {
-        var step = e.speed * dt / (distance || 1);
+        var step = e.speed * dt / Math.max(distance, 0.0001);
         moveBody(e, vx * step, vy * step, 0.2);
       } else {
         e.attack -= dt;
@@ -965,8 +979,8 @@
       if (paused) { releaseAll(); syncAudio(); }
     },
     saveSession: function () {
-      saveSessionState(); savePrefs();
-      return { exact: true, summary: saveSummary() };
+      var saved = saveSessionState(); savePrefs();
+      return { exact: saved, summary: saveSummary() };
     },
     resumeSession: function () {
       var saved = readJson(SAVE_KEY);
@@ -1024,8 +1038,6 @@
     releaseKeyboard();
     if (state === 'jogando') openPause(false);
   });
-  var touch = document.getElementById('toque');
-  if (!window.__pulsyConsole) touch.classList.add('visivel');
   touch.querySelectorAll('[data-pulsy-button]').forEach(function (el) {
     var name = el.getAttribute('data-pulsy-button');
     el.addEventListener('pointerdown', function (event) {
