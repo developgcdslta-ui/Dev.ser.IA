@@ -137,6 +137,49 @@
     if (canStand(body.x + dx, body.y, radius)) body.x += dx;
     if (canStand(body.x, body.y + dy, radius)) body.y += dy;
   }
+  var enemyDetourAngles = [Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2,
+    Math.PI * 3 / 4, -Math.PI * 3 / 4];
+  function enemyMoveProgress(body, dx, dy, directionX, directionY) {
+    var x = body.x, y = body.y;
+    if (canStand(x + dx, y, 0.2)) x += dx;
+    if (canStand(x, y + dy, 0.2)) y += dy;
+    if (x === body.x && y === body.y) return -Infinity;
+    return (x - body.x) * directionX + (y - body.y) * directionY;
+  }
+  function chaseEnemy(enemy, targetX, targetY, dt) {
+    var vx = targetX - enemy.x, vy = targetY - enemy.y, distance = Math.hypot(vx, vy);
+    var step = enemy.speed * dt, directionX = vx / distance, directionY = vy / distance;
+    var beforeX = enemy.x, beforeY = enemy.y;
+    moveBody(enemy, directionX * step, directionY * step, 0.2);
+    if (Math.hypot(enemy.x - beforeX, enemy.y - beforeY) > step * 0.75) {
+      enemy.blockedTime = 0; enemy.detourAngle = null; return;
+    }
+    enemy.blockedTime = (enemy.blockedTime || 0) + dt;
+    if (enemy.blockedTime < 0.12) return;
+
+    vx = targetX - enemy.x; vy = targetY - enemy.y; distance = Math.hypot(vx, vy);
+    directionX = vx / distance; directionY = vy / distance;
+    if (Number.isFinite(enemy.detourAngle) &&
+        enemyMoveProgress(enemy, Math.cos(enemy.detourAngle) * step, Math.sin(enemy.detourAngle) * step,
+          directionX, directionY) !== -Infinity) {
+      moveBody(enemy, Math.cos(enemy.detourAngle) * step, Math.sin(enemy.detourAngle) * step, 0.2);
+      return;
+    }
+    enemy.detourAngle = null;
+    var side = enemy.detourSide < 0 ? -1 : 1, bestOffset = 0, bestProgress = -Infinity, bestAngle = 0;
+    for (var i = 0; i < enemyDetourAngles.length; i++) {
+      var offset = enemyDetourAngles[i] * side, angle = Math.atan2(vy, vx) + offset;
+      var progress = enemyMoveProgress(enemy, Math.cos(angle) * step, Math.sin(angle) * step,
+        directionX, directionY);
+      if (progress > bestProgress + 0.00001) {
+        bestProgress = progress; bestOffset = offset; bestAngle = angle;
+      }
+    }
+    if (bestOffset) {
+      enemy.detourAngle = bestAngle; enemy.detourSide = bestOffset < 0 ? -1 : 1;
+      moveBody(enemy, Math.cos(bestAngle) * step, Math.sin(bestAngle) * step, 0.2);
+    } else enemy.blockedTime = 0;
+  }
   function createAudio() {
     if (!audio) {
       try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
@@ -913,8 +956,7 @@
       var e = enemies[i], vx = player.x - e.x, vy = player.y - e.y, distance = Math.hypot(vx, vy);
       e.hurt = Math.max(0, e.hurt - dt);
       if (distance > 0.56) {
-        var step = e.speed * dt / Math.max(distance, 0.0001);
-        moveBody(e, vx * step, vy * step, 0.2);
+        chaseEnemy(e, player.x, player.y, dt);
       } else {
         e.attack -= dt;
         if (e.attack <= 0 && player.invulnerable <= 0) {
@@ -962,6 +1004,13 @@
   function setAxis(x, y) {
     leftAxis.x = finiteNumber(x, 0, -1, 1); leftAxis.y = finiteNumber(y, 0, -1, 1);
   }
+  function setRightAxis(x, y) {
+    x = finiteNumber(x, 0, -1, 1); y = finiteNumber(y, 0, -1, 1);
+    var magnitude = Math.hypot(x, y);
+    if (magnitude <= 0.08) { rightAxis.x = 0; rightAxis.y = 0; return; }
+    var scale = (magnitude - 0.08) / magnitude;
+    rightAxis.x = x * scale; rightAxis.y = y * scale;
+  }
 
   window.PulsyGame = {
     onButton: function (name, pressed) {
@@ -971,7 +1020,7 @@
     },
     onAxis: function (x, y) { setAxis(x, y); },
     onAxisRight: function (x, y) {
-      rightAxis.x = finiteNumber(x, 0, -1, 1); rightAxis.y = finiteNumber(y, 0, -1, 1);
+      setRightAxis(x, y);
     },
     onPause: function (paused) {
       if (paused && state === 'jogando') openPause(false);
@@ -1058,6 +1107,7 @@
   });
   canvas.addEventListener('pointermove', function (event) {
     if (!drag) return;
+    if (state !== 'jogando' || !player) { endDrag(); return; }
     var dx = event.clientX - drag.x, dy = event.clientY - drag.y;
     player.yaw += dx * 0.006; player.pitch = Math.max(-0.38, Math.min(0.38, player.pitch + dy * 0.004));
     drag.x = event.clientX; drag.y = event.clientY;
