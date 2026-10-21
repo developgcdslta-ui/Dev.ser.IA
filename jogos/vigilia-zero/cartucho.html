@@ -58,7 +58,7 @@
   var ignoreAUntilRelease = false, rafId = 0, lastFrame = 0, rng = 8213907;
   var audio = null, recoil = 0, flash = 0, damageFlash = 0, message = '', messageTimer = 0;
   var activeTransmission = -1, transmissionTimer = 0;
-  var pause = { option: 0, confirm: '', confirmUntil: 0, follow: false, archive: false, archiveIndex: 0 };
+  var pause = { option: 0, confirm: '', confirmUntil: 0, follow: false, help: false, archive: false, archiveIndex: 0 };
   var pauseOptions = ['Continuar', 'Som', 'Ajuda', 'Arquivo', 'Recomeçar', 'Menu'];
   var transmissions = [
     { wave: 1, chapter: 'CAP. 01 · SILÊNCIO', short: 'SILÊNCIO',
@@ -132,7 +132,7 @@
     var mx = Math.floor(x), my = Math.floor(y);
     return my < 0 || my >= MAP.length || mx < 0 || mx >= MAP[0].length || MAP[my][mx] !== '0';
   }
-  for (var markIndex = 0; markIndex < 22; markIndex++) {
+  for (var markIndex = 0; markIndex < 34; markIndex++) {
     var markX = 1.3, markY = 1.3, markAttempts = 0;
     do {
       markX = 1.3 + random() * 13.4; markY = 1.3 + random() * 13.4;
@@ -142,7 +142,7 @@
       floorMarks.push({
         x: markX, y: markY, angle: random() * Math.PI,
         length: 0.08 + random() * 0.22, width: 0.012 + random() * 0.018,
-        type: markIndex % 4
+        type: markIndex % 6, variation: 0.8 + random() * 0.4
       });
     }
   }
@@ -314,7 +314,8 @@
     activeTransmission = -1; transmissionTimer = 0; discoverTransmission(wave);
     waveDelay = 0; bannerTimer = 2.8; recoil = 0; flash = 0; damageFlash = 0;
     enemies.length = 0; pickups.length = 0; sparks.length = 0; sprites.length = 0;
-    state = 'jogando'; pause.follow = false; pause.archive = false; pause.confirm = '';
+    state = 'jogando'; pause.follow = false; pause.help = false; pause.archive = false;
+    pause.confirm = ''; pause.confirmUntil = 0;
     ignoreAUntilRelease = !!held.a; gameOverLock = 0;
     removeKey(SAVE_KEY); createAudio(); syncAudio(); saveSessionState(); draw(); startLoop();
   }
@@ -475,8 +476,8 @@
     });
     message = typeof data.message === 'string' ? data.message.slice(0, 40) : '';
     messageTimer = finiteNumber(data.messageTimer, 0, 0, 4);
-    state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.follow = true;
-    pause.archive = false; pause.archiveIndex = 0;
+    state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.confirmUntil = 0;
+    pause.follow = true; pause.help = false; pause.archive = false; pause.archiveIndex = 0;
     syncAudio(); draw(); return true;
   }
   function saveSummary() {
@@ -528,9 +529,14 @@
     ctx.fillRect(W * 0.16, horizon - 16, 23, 2); ctx.fillRect(W * 0.76, horizon - 16, 34, 2);
     ctx.globalAlpha = 1;
   }
+  function cameraHorizon() {
+    return Math.max(92, Math.min(220, H * 0.455 - player.pitch * 112));
+  }
+  function uiFontSize(size) {
+    return Math.max(size, 12 / Math.max(0.01, scale));
+  }
   function drawWorld() {
-    var horizon = H * 0.455 - player.pitch * 112;
-    horizon = Math.max(92, Math.min(190, horizon));
+    var horizon = cameraHorizon();
     var focal = W / (2 * Math.tan(FOV / 2));
     drawFloorAndSky(horizon);
     for (var col = 0; col < COLS; col++) {
@@ -572,10 +578,17 @@
       if (size < 1) continue;
       var screenY = camera.horizon + camera.focal * 0.44 / distance;
       ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(mark.angle - player.yaw);
-      ctx.globalAlpha = Math.max(0.08, 0.34 - distance * 0.025);
-      ctx.fillStyle = mark.type === 0 ? '#53625b' : mark.type === 1 ? '#101b1d' : '#758277';
+      ctx.globalAlpha = Math.max(0.08, 0.34 - distance * 0.025) * mark.variation;
+      ctx.fillStyle = mark.type === 0 ? '#53625b' : mark.type === 1 ? '#101b1d' :
+        mark.type === 4 ? '#485952' : mark.type === 5 ? '#68776b' : '#758277';
       if (mark.type === 3) {
         ctx.beginPath(); ctx.ellipse(0, 0, size * 0.65, Math.max(1, size * 0.16), 0, 0, Math.PI * 2); ctx.fill();
+      } else if (mark.type === 4) {
+        ctx.beginPath(); ctx.ellipse(0, 0, size * 0.34, Math.max(1, size * 0.1),
+          mark.variation * 0.12, 0, Math.PI * 2); ctx.fill();
+      } else if (mark.type === 5) {
+        ctx.fillRect(-size * 0.28, -Math.max(0.5, size * 0.04), size * 0.56,
+          Math.max(1, size * 0.08));
       } else {
         ctx.fillRect(-size * 0.5, -Math.max(0.5, size * mark.width), size,
           Math.max(1, size * mark.width * 2));
@@ -695,8 +708,8 @@
     }
     ctx.restore();
     if (player.reloadTime > 0) {
-      ctx.fillStyle = '#d3dfd7'; ctx.font = '700 14px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('RECARREGANDO…', W / 2, H - 71);
+      ctx.fillStyle = '#d3dfd7'; ctx.font = '700 ' + uiFontSize(14) + 'px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('RECARREGANDO…', W / 2, H - 71, W - 32);
     }
     if (damageFlash > 0) {
       ctx.globalAlpha = Math.min(0.26, damageFlash * 0.18); ctx.fillStyle = '#e75e50'; ctx.fillRect(0, 0, W, H);
@@ -710,7 +723,7 @@
       ctx.strokeStyle = '#ffbd83'; ctx.globalAlpha = player.hurt * 0.9; ctx.lineWidth = 2;
       ctx.strokeRect(2, 2, W - 4, H - 4); ctx.globalAlpha = 1;
     }
-    var aimY = H * 0.455 - player.pitch * 112;
+    var aimY = H * 0.455;
     ctx.strokeStyle = '#d8f2df'; ctx.globalAlpha = 0.78; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(W / 2 - 8, aimY); ctx.lineTo(W / 2 - 3, aimY);
     ctx.moveTo(W / 2 + 3, aimY); ctx.lineTo(W / 2 + 8, aimY);
@@ -720,46 +733,55 @@
   }
   function drawHud() {
     ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 8, 116, 54); ctx.fillRect(W - 130, 8, 122, 54);
-    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'left';
-    ctx.fillText('ONDA ' + String(wave).padStart(2, '0'), 16, 24);
-    ctx.fillStyle = '#e7f0e9'; ctx.font = '700 14px system-ui'; ctx.fillText('ABATES  ' + String(kills).padStart(2, '0'), 16, 44);
-    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'right';
-    ctx.fillText('VIGOR  ' + Math.ceil(player.hp) + '%', W - 16, 24);
+    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui'; ctx.textAlign = 'left';
+    ctx.fillText('ONDA ' + String(wave).padStart(2, '0'), 16, 24, 100);
+    ctx.fillStyle = '#e7f0e9'; ctx.font = '700 ' + uiFontSize(14) + 'px system-ui';
+    ctx.fillText('ABATES  ' + String(kills).padStart(2, '0'), 16, 44, 104);
+    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui'; ctx.textAlign = 'right';
+    ctx.fillText('VIGOR  ' + Math.ceil(player.hp) + '%', W - 16, 24, 106);
     ctx.fillStyle = '#17252a'; ctx.fillRect(W - 118, 32, 100, 8);
     ctx.fillStyle = player.hp > 50 ? '#75d2a5' : player.hp > 25 ? '#e9b264' : '#e66f60';
     ctx.fillRect(W - 118, 32, 100 * player.hp / 100, 8);
     var stock = player.stocks[player.weapon];
     ctx.fillStyle = '#08151acc'; ctx.fillRect(W - 142, 68, 134, 50);
-    ctx.textAlign = 'right'; ctx.fillStyle = '#b7cbc0'; ctx.font = '700 12px system-ui';
-    ctx.fillText(weaponNames[player.weapon], W - 16, 86);
-    ctx.fillStyle = '#f0f4ed'; ctx.font = '700 22px system-ui';
-    ctx.fillText(String(stock.mag).padStart(2, '0') + ' / ' + stock.reserve, W - 16, 109);
+    ctx.textAlign = 'right'; ctx.fillStyle = '#b7cbc0'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui';
+    ctx.fillText(player.weapon === 'smg' ? 'SMG' : weaponNames[player.weapon], W - 16, 86, 114);
+    ctx.fillStyle = '#f0f4ed'; ctx.font = '700 ' + uiFontSize(22) + 'px system-ui';
+    ctx.fillText(String(stock.mag).padStart(2, '0') + ' / ' + stock.reserve, W - 16, 109, 116);
     ctx.textAlign = 'left'; ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 68, 94, 20);
-    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 12px system-ui'; ctx.fillText('CORRIDA', 14, 82);
+    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui';
+    ctx.fillText('CORRIDA', 14, 82, 48);
     ctx.fillStyle = '#20333a'; ctx.fillRect(66, 74, 30, 8);
     ctx.fillStyle = '#84d6af'; ctx.fillRect(66, 74, 30 * player.stamina / 100, 8);
     if (bannerTimer > 0) {
       ctx.globalAlpha = Math.min(1, bannerTimer, (2.8 - bannerTimer) * 2 + 0.35);
       ctx.fillStyle = '#071318c9'; ctx.fillRect(68, H * 0.25, W - 136, 42);
-      ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 14px system-ui';
+      ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 ' + uiFontSize(14) + 'px system-ui';
       ctx.fillText('ONDA ' + String(wave).padStart(2, '0') + '  ·  CAP. ' +
         String(transmissions.indexOf(currentChapter()) + 1).padStart(2, '0') + ' · ' + currentChapter().short,
-        W / 2, H * 0.25 + 26);
+        W / 2, H * 0.25 + 26, W - 148);
       ctx.globalAlpha = 1;
     }
     if (messageTimer > 0) {
-      ctx.textAlign = 'center'; ctx.fillStyle = '#a9f0cd'; ctx.font = '700 14px system-ui';
-      ctx.fillText(message, W / 2, H * 0.62);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#a9f0cd'; ctx.font = '700 ' + uiFontSize(14) + 'px system-ui';
+      ctx.fillText(message, W / 2, H * 0.62, W - 32);
     }
     if (activeTransmission >= 0 && transmissionTimer > 0) {
-      var transmission = transmissions[activeTransmission], radioY = H * 0.415;
+      var transmission = transmissions[activeTransmission], radioX = 8, radioY = 90, radioWidth = 204;
+      var radioTitleSize = uiFontSize(12), radioLineSize = uiFontSize(13);
+      var radioTitleY = radioY + radioTitleSize;
+      var radioLine1Y = radioTitleY + radioLineSize + 2;
+      var radioLine2Y = radioLine1Y + radioLineSize + 2;
       ctx.globalAlpha = Math.min(1, transmissionTimer, (7 - transmissionTimer) * 2 + 0.35);
-      ctx.fillStyle = '#061015e8'; ctx.fillRect(28, radioY, W - 56, 61);
-      ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 12px system-ui';
-      ctx.fillText(transmission.chapter + ' · ONDA ' + String(transmission.wave).padStart(2, '0'), W / 2, radioY + 17);
-      ctx.fillStyle = '#e4f0e9'; ctx.font = '700 13px system-ui';
-      ctx.fillText(transmission.lines[0], W / 2, radioY + 37);
-      ctx.fillText(transmission.lines[1], W / 2, radioY + 53);
+      ctx.fillStyle = '#061015d9';
+      ctx.fillRect(radioX, radioY, radioWidth, radioLine2Y - radioY + 5);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b';
+      ctx.font = '800 ' + radioTitleSize + 'px system-ui';
+      ctx.fillText(transmission.short + ' · ONDA ' + String(transmission.wave).padStart(2, '0'),
+        radioX + radioWidth / 2, radioTitleY, radioWidth - 16);
+      ctx.fillStyle = '#e4f0e9'; ctx.font = '700 ' + radioLineSize + 'px system-ui';
+      ctx.fillText(transmission.lines[0], radioX + radioWidth / 2, radioLine1Y, radioWidth - 16);
+      ctx.fillText(transmission.lines[1], radioX + radioWidth / 2, radioLine2Y, radioWidth - 16);
       ctx.globalAlpha = 1;
     }
     ctx.textAlign = 'left';
@@ -814,8 +836,8 @@
     drawDust(seconds);
   }
   function drawText(text, x, y, size, color, weight) {
-    ctx.fillStyle = color; ctx.font = (weight || 700) + ' ' + size + 'px system-ui, sans-serif';
-    ctx.textAlign = 'center'; ctx.fillText(text, x, y);
+    ctx.fillStyle = color; ctx.font = (weight || 700) + ' ' + uiFontSize(size) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText(text, x, y, W - 48);
   }
   function drawMenu() {
     drawMenuBackdrop();
@@ -835,7 +857,27 @@
       W / 2, 323, 12, '#8da69a');
     ctx.textAlign = 'left';
   }
+  function expirePauseConfirmation(now) {
+    if (pause.confirm && now >= pause.confirmUntil) {
+      pause.confirm = ''; pause.confirmUntil = 0;
+    }
+  }
+  function schedulePauseConfirmationExpiry(selected, confirmUntil) {
+    window.setTimeout(function () {
+      if (state !== 'pausa' || pause.follow || pause.archive ||
+          pause.confirm !== selected || pause.confirmUntil !== confirmUntil) return;
+      var remaining = confirmUntil - performance.now();
+      if (remaining > 0) {
+        schedulePauseConfirmationExpiry(selected, confirmUntil);
+        return;
+      }
+      expirePauseConfirmation(performance.now());
+      draw();
+    }, Math.max(0, confirmUntil - performance.now()));
+  }
   function drawPause() {
+    var now = performance.now();
+    expirePauseConfirmation(now);
     if (pause.archive && !pause.follow) { drawArchive(); return; }
     ctx.fillStyle = '#040a0cce'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#101d22'; ctx.fillRect(44, 36, W - 88, H - 72);
@@ -845,15 +887,25 @@
       drawText('Ⓐ PARA SEGUIR', W / 2, 122, 17, '#e6f0e7', 800);
       drawText('O setor está seguro enquanto você volta.', W / 2, 151, 12, '#a9bcb0');
     } else {
+      var optionFontSize = uiFontSize(14), optionStep = Math.max(21, optionFontSize + 6);
       for (var i = 0; i < pauseOptions.length; i++) {
         var label = pauseOptions[i];
         if (label === 'Som') label += ': ' + (prefs.som ? 'ligado' : 'desligado');
         if (label === 'Arquivo') label += ' (' + unlockedTransmissions().length + ')';
-        if (pause.confirm === pauseOptions[i]) label = 'A DE NOVO PARA ' + (label === 'Menu' ? 'SAIR' : 'RECOMEÇAR');
-        drawText((pause.option === i ? '›  ' : '   ') + label, W / 2, 111 + i * 21, 14,
+        if (pause.confirm === pauseOptions[i] && now < pause.confirmUntil) {
+          label = 'A DE NOVO PARA ' + (label === 'Menu' ? 'SAIR' : 'RECOMEÇAR');
+        }
+        drawText((pause.option === i ? '›  ' : '   ') + label, W / 2, 111 + i * optionStep, 14,
           pause.option === i ? '#9be0be' : '#d8e3d9', 700);
       }
-      drawText('RECOMEÇAR E MENU PEDEM CONFIRMAÇÃO', W / 2, 249, 12, '#beaa86');
+      var footerY = Math.max(249, 111 + (pauseOptions.length - 1) * optionStep + optionFontSize + 12);
+      drawText('RECOMEÇAR E MENU PEDEM CONFIRMAÇÃO', W / 2, footerY, 12, '#beaa86');
+      if (pause.help) {
+        var helpY = Math.max(274, footerY + uiFontSize(12) + 10);
+        var helpStep = uiFontSize(12) + 4;
+        drawText('A atira · B corre · X recarrega', W / 2, helpY, 12, '#d8e3d9');
+        drawText('L/R troca arma · analógico direito mira', W / 2, helpY + helpStep, 12, '#d8e3d9');
+      }
     }
     drawText('↑↓ navegar · A confirmar · B/+ voltar · − som', W / 2, 88, 12, '#a9bcb0');
     ctx.textAlign = 'left';
@@ -915,10 +967,14 @@
   }
   function hitEnemy(angle, damage) {
     var target = null, nearest = 999;
+    var focal = W / (2 * Math.tan(FOV / 2)), horizon = cameraHorizon(), aimY = H * 0.455;
     for (var i = 0; i < enemies.length; i++) {
       var e = enemies[i], dx = e.x - player.x, dy = e.y - player.y, dist = Math.hypot(dx, dy);
       var enemyAngle = normalizeAngle(Math.atan2(dy, dx) - player.yaw);
       if (dist > nearest || Math.abs(normalizeAngle(enemyAngle - angle)) > Math.atan2(0.25, dist) + 0.012) continue;
+      var enemyTop = horizon - focal * 0.44 / dist;
+      var enemyBottom = horizon + focal * 0.48 / dist;
+      if (aimY < enemyTop || aimY > enemyBottom) continue;
       if (!lineOfSight(dist, player.yaw + angle)) continue;
       target = e; nearest = dist;
     }
@@ -977,30 +1033,36 @@
   }
   function openPause(follow) {
     if (state !== 'jogando' && state !== 'pausa') return;
-    state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.follow = !!follow; pause.archive = false;
+    state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.confirmUntil = 0;
+    pause.follow = !!follow; pause.help = false; pause.archive = false;
     releaseAll(); stopLoop(); syncAudio(); saveSessionState(); draw();
   }
   function closePause() {
     if (state !== 'pausa' || pause.follow) return;
-    state = 'jogando'; pause.confirm = ''; pause.archive = false; ignoreAUntilRelease = !!held.a;
+    state = 'jogando'; pause.confirm = ''; pause.confirmUntil = 0; pause.help = false;
+    pause.archive = false; ignoreAUntilRelease = !!held.a;
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function choosePause() {
     var selected = pauseOptions[pause.option], now = performance.now();
+    expirePauseConfirmation(now);
     if (selected === 'Continuar') { closePause(); return; }
     if (selected === 'Som') { toggleSound(); return; }
-    if (selected === 'Ajuda') { message = 'A: atirar  ·  B: correr  ·  X: recarregar'; messageTimer = 2.8; draw(); return; }
+    if (selected === 'Ajuda') { pause.help = true; draw(); return; }
     if (selected === 'Arquivo') {
-      pause.archiveIndex = Math.max(0, unlockedTransmissions().length - 1); pause.archive = true; draw(); return;
+      pause.help = false; pause.archiveIndex = Math.max(0, unlockedTransmissions().length - 1);
+      pause.archive = true; draw(); return;
     }
     if (pause.confirm === selected && now < pause.confirmUntil) {
       if (selected === 'Recomeçar') startGame();
       else {
-        state = 'menu'; pause.confirm = ''; saveSessionState(); syncAudio(); draw();
+        state = 'menu'; pause.confirm = ''; pause.confirmUntil = 0;
+        pause.help = false; saveSessionState(); syncAudio(); draw();
       }
       return;
     }
-    pause.confirm = selected; pause.confirmUntil = now + 2000; draw();
+    pause.confirm = selected; pause.confirmUntil = now + 2000;
+    schedulePauseConfirmationExpiry(selected, pause.confirmUntil); draw();
   }
   function releaseAll() {
     held = Object.create(null); leftAxis.x = 0; leftAxis.y = 0;
@@ -1043,8 +1105,13 @@
         } else if (name === 'start') closePause();
         return;
       }
-      if (name === 'up') { pause.option = (pause.option + pauseOptions.length - 1) % pauseOptions.length; pause.confirm = ''; draw(); }
-      else if (name === 'down') { pause.option = (pause.option + 1) % pauseOptions.length; pause.confirm = ''; draw(); }
+      if (name === 'up') {
+        pause.option = (pause.option + pauseOptions.length - 1) % pauseOptions.length;
+        pause.confirm = ''; pause.confirmUntil = 0; pause.help = false; draw();
+      } else if (name === 'down') {
+        pause.option = (pause.option + 1) % pauseOptions.length;
+        pause.confirm = ''; pause.confirmUntil = 0; pause.help = false; draw();
+      }
       else if (name === 'a') choosePause();
       else if (name === 'b' || name === 'start') closePause();
       return;
