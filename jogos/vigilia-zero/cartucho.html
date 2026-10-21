@@ -952,11 +952,11 @@
     ctx.fillText(weaponLabel, W - 16, 86, 114);
     ctx.fillStyle = '#f0f4ed'; ctx.font = '700 ' + uiFontSize(22) + 'px system-ui';
     ctx.fillText(String(stock.mag).padStart(2, '0') + ' / ' + stock.reserve, W - 16, 109, 116);
-    ctx.textAlign = 'left'; ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 68, 94, 20);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 68, 112, 20);
     ctx.fillStyle = '#a9c1b5'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui';
-    ctx.fillText('FÔLEGO', 14, 82, 48);
-    ctx.fillStyle = '#20333a'; ctx.fillRect(66, 74, 30, 8);
-    ctx.fillStyle = '#84d6af'; ctx.fillRect(66, 74, 30 * player.stamina / 100, 8);
+    ctx.fillText('FÔLEGO', 14, 82, 64);
+    ctx.fillStyle = '#20333a'; ctx.fillRect(82, 74, 30, 8);
+    ctx.fillStyle = '#84d6af'; ctx.fillRect(82, 74, 30 * player.stamina / 100, 8);
     if (bannerTimer > 0 && transmissionTimer <= 0) {
       ctx.globalAlpha = Math.min(1, bannerTimer, (2.8 - bannerTimer) * 2 + 0.35);
       ctx.fillStyle = '#071318c9'; ctx.fillRect(68, H * 0.25, W - 136, 42);
