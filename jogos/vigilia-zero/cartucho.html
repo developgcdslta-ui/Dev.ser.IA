@@ -785,7 +785,9 @@
     var depth = dist * Math.cos(angle);
     if (depth < 0.15) return;
     var screenX = W * 0.5 + Math.tan(angle) * camera.focal;
-    var size = camera.focal / depth, height = size * 0.92, width = height * 0.56;
+    var maxSize = Math.min(H * 0.64 / 0.92, (camera.horizon - 8) / 0.44,
+      (H - camera.horizon - 10) / 0.52);
+    var size = Math.min(camera.focal / depth, maxSize), height = size * 0.92, width = height * 0.56;
     if (height < 2 || screenX + width * 0.5 <= 0 || screenX - width * 0.5 >= W) return;
     var foot = camera.horizon + size * 0.48;
     var top = foot - height, bob = Math.sin(seconds * 4 + e.phase) * Math.min(3, height * 0.04);
