@@ -1,0 +1,23 @@
+name: Validar cartuchos
+
+# Só valida. Nunca publica nada e não tem acesso a nenhum segredo do Pulsy.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Modelo
+        run: node ferramentas/validar-cartucho.mjs modelo/cartucho-modelo.html
+      - name: Jogos da comunidade
+        run: node ferramentas/validar-cartucho.mjs --todos

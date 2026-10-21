@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Coleta de Pulsos</title>
+<!--
+  Cartucho-modelo do Console Pulsy.
+  Mostra, num jogo pequeno, tudo o que um cartucho precisa: o contrato window.PulsyGame,
+  a convenção de botões, a pausa navegável com confirmação, "voltar pausado", a trava
+  depois do fim de jogo, saves separados (partida x preferências), som que pausa junto
+  e controles de toque/teclado para quando não há Console. Copie e troque o jogo.
+-->
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #07080c;
+    color: #f3ead2; font-family: system-ui, sans-serif; touch-action: none;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  /* Controles de toque: só aparecem fora do Console (navegador / chat). */
+  .toque { position: fixed; inset: auto 0 0 0; display: none; justify-content: space-between;
+    padding: 10px; pointer-events: none; }
+  .toque.visivel { display: flex; }
+  .toque button { pointer-events: auto; width: 56px; height: 56px; border-radius: 50%;
+    border: 2px solid #d4af37; background: #1a1710cc; color: #f3ead2; font: 700 18px system-ui; }
+</style>
+</head>
+<body>
+<canvas id="tela" aria-label="Coleta de Pulsos"></canvas>
+<div class="toque" id="toque" data-pulsy-touch-controls>
+  <button data-pulsy-button="b" aria-label="B">B</button>
+  <button data-pulsy-button="start" aria-label="Pausar">II</button>
+  <button data-pulsy-button="a" aria-label="A">A</button>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  // ── Saves: preferências (nunca apagam) x partida (o "Novo jogo" apaga) ──────────
+  var CHAVE_PREFS = 'coleta-de-pulsos.prefs.v1';
+  var CHAVE_PARTIDA = 'coleta-de-pulsos.partida.v1';
+
+  function ler(chave) {
+    try { return JSON.parse(localStorage.getItem(chave) || 'null'); } catch (e) { return null; }
+  }
+  function gravar(chave, valor) {
+    try { localStorage.setItem(chave, JSON.stringify(valor)); } catch (e) { /* cheio: o jogo segue */ }
+  }
+  function apagar(chave) {
+    try { localStorage.removeItem(chave); } catch (e) {}
+  }
+  function numero(v, padrao, min, max) {
+    var n = Number(v);                       // nunca Number(v) || padrao: o 0 é válido
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : padrao;
+  }
+  function lerPrefs() {
+    var d = ler(CHAVE_PREFS);
+    if (!d || d.versao !== 1) return { versao: 1, recorde: 0, som: true };
+    return { versao: 1, recorde: numero(d.recorde, 0, 0, 1e9), som: d.som !== false };
+  }
+  var prefs = lerPrefs();
+  function gravarPrefs() { gravar(CHAVE_PREFS, prefs); }
+
+  // ── Som gerado no código (WebAudio) ──────────────────────────────────────────────
+  var audio = null;
+  function garantirAudio() {
+    if (!audio) {
+      try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
+    }
+    sincronizarAudio();
+  }
+  function sincronizarAudio() {
+    if (!audio) return;
+    var deveTocar = prefs.som && estado === 'jogando' && document.visibilityState !== 'hidden';
+    try { if (deveTocar) audio.resume(); else audio.suspend(); } catch (e) {}
+  }
+  function bipe(freq, dur) {
+    if (!audio || !prefs.som || audio.state !== 'running') return;
+    var o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+    o.frequency.value = freq; o.type = 'triangle';
+    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audio.destination); o.start(t); o.stop(t + dur);
+  }
+
+  // ── Tela responsiva: mundo fixo 400×360, escalado para caber ─────────────────────
+  var canvas = document.getElementById('tela');
+  var ctx = canvas.getContext('2d');
+  var W = 400, H = 360, escala = 1, ox = 0, oy = 0;
+  function ajustarTela() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var cw = window.innerWidth, ch = window.innerHeight;
+    canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
+    escala = Math.min(cw / W, ch / H) * dpr;
+    ox = (canvas.width - W * escala) / 2; oy = (canvas.height - H * escala) / 2;
+    desenhar();
+  }
+  window.addEventListener('resize', ajustarTela);
+
+  // ── Estado do jogo ───────────────────────────────────────────────────────────────
+  var estado = 'menu';            // menu | jogando | pausa | fim
+  var jogador, pulsos, faiscas, pontos, vidas, nivel, invencivel, dashTempo, dashRecarga;
+  var travaAte = 0;               // ignora botões até este instante (fim de jogo)
+  var pausa = { opcao: 0, confirmar: '', confirmarAte: 0, seguir: false };
+  var OPCOES = ['Continuar', 'Som', 'Recomeçar', 'Menu'];
+
+  function startGame() {         // começar / reiniciar a partida
+    jogador = { x: W / 2, y: H / 2, r: 9 };
+    pontos = 0; vidas = 3; nivel = 1; invencivel = 1.2; dashTempo = 0; dashRecarga = 0;
+    pulsos = []; faiscas = [];
+    for (var i = 0; i < 4; i++) novoPulso();
+    for (var j = 0; j < 2; j++) novaFaisca();
+    estado = 'jogando';
+    garantirAudio();
+    apagar(CHAVE_PARTIDA);
+  }
+  function novoPulso() { pulsos.push({ x: 20 + Math.random() * (W - 40), y: 40 + Math.random() * (H - 60), r: 6 }); }
+  function novaFaisca() {
+    var a = Math.random() * Math.PI * 2, v = 60 + nivel * 12;
+    faiscas.push({ x: Math.random() < 0.5 ? 20 : W - 20, y: 40 + Math.random() * (H - 60),
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v, r: 7 });
+  }
+
+  function fimDeJogo() {
+    estado = 'fim';
+    travaAte = performance.now() + 500;      // o jogador ainda está martelando
+    if (pontos > prefs.recorde) { prefs.recorde = pontos; }
+    gravarPrefs();
+    apagar(CHAVE_PARTIDA);
+    sincronizarAudio();
+    bipe(140, 0.5);
+  }
+
+  function abrirPausa(seguir) {
+    if (estado !== 'jogando' && estado !== 'pausa') return;
+    estado = 'pausa';
+    pausa.opcao = 0; pausa.confirmar = ''; pausa.seguir = !!seguir;
+    soltarTudo();
+    sincronizarAudio();
+    salvarPartida();
+  }
+  function fecharPausa() {
+    estado = 'jogando';
+    pausa.confirmar = ''; pausa.seguir = false;
+    ignorarAteSoltar = true;                   // o A que despausa não vira ação
+    garantirAudio();
+  }
+  function escolherNaPausa() {
+    var nome = OPCOES[pausa.opcao];
+    var agora = performance.now();
+    if (nome === 'Continuar') { fecharPausa(); return; }
+    if (nome === 'Som') { alternarSom(); return; }
+    // Recomeçar e Menu pedem confirmação: o segundo A em até 2 s.
+    if (pausa.confirmar === nome && agora < pausa.confirmarAte) {
+      if (nome === 'Recomeçar') startGame();
+      else { estado = 'menu'; salvarPartida(); }
+      return;
+    }
+    pausa.confirmar = nome; pausa.confirmarAte = agora + 2000;
+  }
+  function alternarSom() {
+    prefs.som = !prefs.som; gravarPrefs(); garantirAudio(); bipe(660, 0.08);
+  }
+
+  // ── Entrada: botões, analógico, teclado e toque ────────────────────────────────
+  var segurado = {};              // botões apertados agora
+  var eixo = { x: 0, y: 0 };      // analógico esquerdo
+  var ignorarAteSoltar = false;   // depois de despausar, o A só vale no próximo aperto
+
+  function soltarTudo() { segurado = {}; eixo.x = 0; eixo.y = 0; }
+
+  function botao(nome, apertado) {
+    if (!apertado) { delete segurado[nome]; if (nome === 'a') ignorarAteSoltar = false; return; }
+    if (segurado[nome]) return;     // repetição: já estava apertado
+    segurado[nome] = true;
+    var agora = performance.now();
+
+    if (nome === 'select') { alternarSom(); return; }           // − = som, em qualquer tela
+
+    if (estado === 'menu') {
+      if (nome === 'a' || nome === 'start') startGame();        // só A e + começam
+      return;
+    }
+    if (estado === 'fim') {
+      if (agora < travaAte) return;                              // trava pós-tela
+      if (nome === 'a' || nome === 'start') startGame();
+      return;
+    }
+    if (estado === 'pausa') {
+      if (nome === 'up') { pausa.opcao = (pausa.opcao + OPCOES.length - 1) % OPCOES.length; pausa.confirmar = ''; }
+      else if (nome === 'down') { pausa.opcao = (pausa.opcao + 1) % OPCOES.length; pausa.confirmar = ''; }
+      else if (nome === 'a') { if (pausa.seguir) fecharPausa(); else escolherNaPausa(); }
+      else if (nome === 'b' || nome === 'start') fecharPausa(); // B e + fecham a pausa
+      return;
+    }
+    // jogando
+    if (nome === 'start') { abrirPausa(false); return; }         // + pausa; B NUNCA pausa
+    if (nome === 'a' && !ignorarAteSoltar && dashRecarga <= 0) { // A = arrancada
+      dashTempo = 0.18; dashRecarga = 0.9; bipe(520, 0.06);
+    }
+    // B = andar devagar (segurado), ação não destrutiva
+  }
+
+  // Contrato oficial do Console. Definido ANTES de o jogo começar.
+  window.PulsyGame = {
+    onButton: function (nome, apertado) { try { botao(String(nome), !!apertado); } catch (e) {} },
+    onAxis: function (x, y) { eixo.x = numero(x, 0, -1, 1); eixo.y = numero(y, 0, -1, 1); },
+    onPause: function (pausado) {
+      if (pausado) { if (estado === 'jogando') abrirPausa(false); soltarTudo(); sincronizarAudio(); }
+      else if (estado === 'pausa') { pausa.seguir = true; }      // voltar PAUSADO: "Ⓐ para seguir"
+    },
+    saveSession: function () {
+      salvarPartida(); gravarPrefs();
+      var resumo = estado === 'menu' || estado === 'fim'
+        ? 'Menu · recorde ' + prefs.recorde
+        : 'Nível ' + nivel + ' · ' + pontos + ' pts';
+      return { exact: false, summary: resumo };                  // volta ao centro da arena
+    },
+    resumeSession: function () {
+      var p = ler(CHAVE_PARTIDA);
+      if (p && p.versao === 1) {
+        startGame();
+        pontos = numero(p.pontos, 0, 0, 1e9); vidas = numero(p.vidas, 3, 1, 5); nivel = numero(p.nivel, 1, 1, 99);
+        abrirPausa(true);                                       // continua pausado
+      } else {
+        estado = 'menu';                                        // nada a retomar: menu com o recorde
+      }
+      return true;
+    },
+    newSession: function () { apagar(CHAVE_PARTIDA); estado = 'menu'; soltarTudo(); }
+  };
+
+  function salvarPartida() {
+    if (estado === 'jogando' || estado === 'pausa') {
+      gravar(CHAVE_PARTIDA, { versao: 1, pontos: pontos, vidas: vidas, nivel: nivel });
+    }
+  }
+
+  // Teclado (navegador): mesmos nomes do contrato.
+  var TECLAS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    w: 'up', s: 'down', a: 'left', d: 'right', ' ': 'a', Enter: 'a', z: 'a',
+    x: 'b', Escape: 'b', p: 'start', m: 'select' };
+  document.addEventListener('keydown', function (e) {
+    var nome = TECLAS[e.key] || TECLAS[(e.key || '').toLowerCase()];
+    if (!nome) return; e.preventDefault(); garantirAudio(); botao(nome, true);
+  });
+  document.addEventListener('keyup', function (e) {
+    var nome = TECLAS[e.key] || TECLAS[(e.key || '').toLowerCase()];
+    if (nome) botao(nome, false);
+  });
+
+  // Toque (fora do Console): arrastar move; botões A, B e pausa embaixo.
+  var toque = document.getElementById('toque');
+  if (!window.__pulsyConsole) toque.classList.add('visivel');
+  toque.querySelectorAll('[data-pulsy-button]').forEach(function (b) {
+    var nome = b.getAttribute('data-pulsy-button');
+    b.addEventListener('pointerdown', function (e) { e.preventDefault(); garantirAudio(); botao(nome, true); });
+    b.addEventListener('pointerup', function () { botao(nome, false); });
+    b.addEventListener('pointercancel', function () { botao(nome, false); });
+  });
+  var arrasto = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    garantirAudio();
+    if (estado !== 'jogando') { botao('a', true); botao('a', false); return; }
+    arrasto = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!arrasto) return;
+    var dx = (e.clientX - arrasto.x) / 40, dy = (e.clientY - arrasto.y) / 40;
+    var m = Math.hypot(dx, dy); if (m > 1) { dx /= m; dy /= m; }
+    eixo.x = dx; eixo.y = dy;
+  });
+  function fimArrasto() { arrasto = null; eixo.x = 0; eixo.y = 0; }
+  canvas.addEventListener('pointerup', fimArrasto);
+  canvas.addEventListener('pointercancel', fimArrasto);
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden' && estado === 'jogando') abrirPausa(false);
+    sincronizarAudio();
+  });
+  window.addEventListener('pagehide', function () { salvarPartida(); gravarPrefs(); });
+
+  // ── Laço do jogo ──────────────────────────────────────────────────────────────
+  var ultimo = performance.now();
+  function quadro(agora) {
+    var dt = Math.min(1 / 30, (agora - ultimo) / 1000); ultimo = agora;
+    if (estado === 'jogando') atualizar(dt);
+    desenhar();
+    requestAnimationFrame(quadro);
+  }
+
+  function direcao() {
+    // Analógico tem prioridade; o direcional é a reserva (o analógico também o aperta).
+    if (Math.abs(eixo.x) > 0.2 || Math.abs(eixo.y) > 0.2) return { x: eixo.x, y: eixo.y };
+    var x = (segurado.right ? 1 : 0) - (segurado.left ? 1 : 0);
+    var y = (segurado.down ? 1 : 0) - (segurado.up ? 1 : 0);
+    var m = Math.hypot(x, y) || 1;
+    return { x: x / m, y: y / m };
+  }
+
+  function atualizar(dt) {
+    var d = direcao();
+    var vel = segurado.b ? 90 : 170;                       // B segurado = devagar
+    if (dashTempo > 0) { vel = 520; dashTempo -= dt; }
+    if (dashRecarga > 0) dashRecarga -= dt;
+    if (invencivel > 0) invencivel -= dt;
+    jogador.x = Math.max(jogador.r, Math.min(W - jogador.r, jogador.x + d.x * vel * dt));
+    jogador.y = Math.max(30 + jogador.r, Math.min(H - jogador.r, jogador.y + d.y * vel * dt));
+
+    for (var i = pulsos.length - 1; i >= 0; i--) {
+      var p = pulsos[i];
+      if (Math.hypot(p.x - jogador.x, p.y - jogador.y) < p.r + jogador.r) {
+        pulsos.splice(i, 1); novoPulso(); pontos += 10; bipe(880, 0.05);
+        if (pontos % 100 === 0) { nivel++; if (faiscas.length < 12) novaFaisca(); }   // sempre com teto
+      }
+    }
+    for (var j = 0; j < faiscas.length; j++) {
+      var f = faiscas[j];
+      f.x += f.vx * dt; f.y += f.vy * dt;
+      if (f.x < f.r || f.x > W - f.r) f.vx = -f.vx;
+      if (f.y < 30 + f.r || f.y > H - f.r) f.vy = -f.vy;
+      if (invencivel <= 0 && Math.hypot(f.x - jogador.x, f.y - jogador.y) < f.r + jogador.r) {
+        vidas--; invencivel = 1.5; bipe(200, 0.2);
+        if (vidas <= 0) { fimDeJogo(); return; }
+      }
+    }
+  }
+
+  function texto(t, x, y, tam, cor) {
+    ctx.fillStyle = cor || '#f3ead2'; ctx.font = '700 ' + tam + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText(t, x, y);
+  }
+
+  function desenhar() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#07080c'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(escala, 0, 0, escala, ox, oy);
+    ctx.fillStyle = '#10131c'; ctx.fillRect(0, 0, W, H);
+
+    if (estado === 'menu') {
+      texto('COLETA DE PULSOS', W / 2, 130, 26, '#d4af37');
+      texto('Pegue os pulsos dourados, fuja das faíscas.', W / 2, 165, 13);
+      texto('A ou + começa · A arranca · B devagar · − som', W / 2, 190, 12, '#bdb59c');
+      texto('Recorde ' + prefs.recorde, W / 2, 230, 15);
+      return;
+    }
+
+    // HUD
+    texto(pontos + ' pts', 50, 20, 14);
+    texto('Nível ' + nivel, W / 2, 20, 14);
+    texto('♥'.repeat(Math.max(0, vidas)) + (prefs.som ? '  ♪' : '  ✕'), W - 60, 20, 14, '#e8a3a3');
+
+    for (var i = 0; i < pulsos.length; i++) {
+      ctx.fillStyle = '#d4af37'; ctx.beginPath(); ctx.arc(pulsos[i].x, pulsos[i].y, pulsos[i].r, 0, 6.283); ctx.fill();
+    }
+    for (var j = 0; j < faiscas.length; j++) {
+      ctx.fillStyle = '#e8553c'; ctx.beginPath(); ctx.arc(faiscas[j].x, faiscas[j].y, faiscas[j].r, 0, 6.283); ctx.fill();
+    }
+    if (!(invencivel > 0 && Math.floor(invencivel * 10) % 2)) {
+      ctx.fillStyle = dashTempo > 0 ? '#ffffff' : '#7fd3ff';
+      ctx.beginPath(); ctx.arc(jogador.x, jogador.y, jogador.r, 0, 6.283); ctx.fill();
+    }
+
+    if (estado === 'pausa') {
+      ctx.fillStyle = '#000000b8'; ctx.fillRect(0, 0, W, H);
+      texto('PAUSA', W / 2, 90, 26, '#d4af37');
+      if (pausa.seguir) {
+        texto('Ⓐ para seguir', W / 2, 130, 16);
+      } else {
+        for (var k = 0; k < OPCOES.length; k++) {
+          var rotulo = OPCOES[k] === 'Som' ? 'Som: ' + (prefs.som ? 'ligado' : 'desligado') : OPCOES[k];
+          if (pausa.confirmar === OPCOES[k]) rotulo = 'A de novo para confirmar';
+          texto((k === pausa.opcao ? '▶ ' : '') + rotulo, W / 2, 140 + k * 30, 16,
+            k === pausa.opcao ? '#d4af37' : '#f3ead2');
+        }
+      }
+      texto('↑↓ escolhe · A confirma · B ou + volta · − som', W / 2, H - 24, 11, '#bdb59c');
+    }
+    if (estado === 'fim') {
+      ctx.fillStyle = '#000000b8'; ctx.fillRect(0, 0, W, H);
+      texto('FIM DE JOGO', W / 2, 130, 26, '#e8553c');
+      texto(pontos + ' pontos · recorde ' + prefs.recorde, W / 2, 165, 15);
+      texto('A ou + para jogar novamente', W / 2, 200, 13, '#bdb59c');
+    }
+  }
+
+  ajustarTela();
+  requestAnimationFrame(quadro);
+})();
+</script>
+</body>
+</html>

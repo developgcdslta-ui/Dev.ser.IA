@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Simulador do Console Pulsy</title>
+<!--
+  Simulador SIMPLIFICADO do Console Pulsy para testar cartuchos no navegador.
+  Carrega o cartucho com a mesma CSP do Console e chama window.PulsyGame como o Console
+  chama. A palavra final é sempre o Console no aparelho, mas tudo o que falha aqui
+  também falha lá.
+  Teclado: setas = direcional · WASD = analógico · J = A · K = B · U = X · I = Y ·
+           Q = L · E = R · Enter = + · Shift = − · Esc = ⚙ (pausa/volta)
+-->
+<style>
+  :root { --ouro: #b8902c; --fundo: #f7f4ec; --painel: #fffdf7; --linha: #e6dcc2; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: #2b2618; font: 14px system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--linha); }
+  header h1 { font-size: 16px; margin: 0 10px 0 0; }
+  select, button, input[type=file] { font: inherit; }
+  .cabine { display: flex; justify-content: center; align-items: stretch; gap: 10px; padding: 16px; }
+  .punho { width: 190px; background: var(--painel); border: 1px solid var(--linha); border-radius: 22px; padding: 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .linha { display: flex; gap: 10px; justify-content: center; }
+  .b { width: 48px; height: 48px; border-radius: 50%; border: 2px solid var(--ouro); background: #fff; color: #6b5310;
+    font: 700 18px system-ui; cursor: pointer; touch-action: none; }
+  .b.on { background: var(--ouro); color: #fff; }
+  .ombro { width: 150px; height: 40px; border-radius: 12px; }
+  .losango { display: grid; grid-template-columns: 48px 48px 48px; grid-template-rows: 48px 48px 48px; gap: 2px; }
+  .stick { width: 120px; height: 120px; border-radius: 50%; background: #efe8d6; border: 1px solid var(--linha); position: relative; touch-action: none; }
+  .stick i { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: #ddd3bb; }
+  .tela { background: #000; border: 3px solid var(--ouro); border-radius: 14px; overflow: hidden; position: relative;
+    align-self: center; }
+  iframe { border: 0; display: block; background: #000; }
+  .dialogo { position: absolute; inset: 0; background: #000c; color: #fff; display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px; }
+  .dialogo.on { display: flex; }
+  .dialogo button { padding: 8px 14px; border-radius: 10px; border: 1px solid var(--ouro); background: #1a1710; color: #fff; }
+  .armas { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; min-height: 30px; }
+  .armas button { font-size: 11px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--linha); background: #fff; }
+  .armas button.atual { border-color: var(--ouro); background: #fbf1d3; }
+  #log { margin: 0 16px 16px; height: 150px; overflow: auto; background: #1b1913; color: #d8cfb5; border-radius: 10px;
+    padding: 8px 10px; font: 12px ui-monospace, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎮 Simulador do Console Pulsy</h1>
+  <input type="file" id="arquivo" accept=".html,text/html">
+  <label>Tela:
+    <select id="tamanho">
+      <option value="420x370">Galaxy S10 (420×370)</option>
+      <option value="360x320">Celular pequeno (360×320)</option>
+      <option value="560x430">Celular grande (560×430)</option>
+      <option value="800x600">Navegador (800×600)</option>
+    </select>
+  </label>
+  <button id="recarregar">↻ Recarregar</button>
+</header>
+
+<div class="cabine">
+  <div class="punho">
+    <div class="linha"><button class="b" data-sis="home" title="HOME">⌂</button><button class="b" data-btn="select" title="− (select)">−</button></div>
+    <button class="b ombro" data-btn="l">L</button>
+    <div class="stick" id="stickE" title="Analógico esquerdo (WASD)"><i></i></div>
+    <div class="losango">
+      <span></span><button class="b" data-btn="up">▲</button><span></span>
+      <button class="b" data-btn="left">◀</button><span></span><button class="b" data-btn="right">▶</button>
+      <span></span><button class="b" data-btn="down">▼</button><span></span>
+    </div>
+  </div>
+  <div class="tela" id="tela">
+    <iframe id="jogo" title="Cartucho"></iframe>
+    <div class="dialogo" id="dialogo"></div>
+  </div>
+  <div class="punho">
+    <div class="linha"><button class="b" data-sis="engrenagem" title="⚙ (Esc)">⚙</button><button class="b" data-btn="start" title="+ (start)">+</button></div>
+    <button class="b ombro" data-btn="r">R</button>
+    <div class="losango">
+      <span></span><button class="b" data-btn="x">X</button><span></span>
+      <button class="b" data-btn="y">Y</button><span></span><button class="b" data-btn="a">A</button>
+      <span></span><button class="b" data-btn="b">B</button><span></span>
+    </div>
+    <div class="armas" id="armas"></div>
+    <div class="stick" id="stickD" title="Analógico direito"><i></i></div>
+  </div>
+</div>
+<pre id="log"></pre>
+
+<script>
+(function () {
+  'use strict';
+  var CSP = "default-src 'none'; img-src data: blob:; media-src data: blob:; font-src data:; "
+    + "style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; "
+    + "frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+  var PREPARO = '<meta http-equiv="Content-Security-Policy" content="' + CSP + '">'
+    + '<script>window.__pulsyConsole={version:3,sessions:true,weaponDeck:true,simulador:true};'
+    + 'try{window.dispatchEvent(new CustomEvent("pulsy-console-ready",{detail:{version:1}}))}catch(e){}<\/script>';
+
+  var iframe = document.getElementById('jogo');
+  var dialogo = document.getElementById('dialogo');
+  var logEl = document.getElementById('log');
+  var htmlAtual = '';
+  var pausadoPeloSistema = false;
+  var sessao = null;            // o que o Console guarda: só o resumo
+  var apertados = {};
+
+  function log(t) { logEl.textContent += t + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+  function jogo() { try { return iframe.contentWindow && iframe.contentWindow.PulsyGame; } catch (e) { return null; } }
+  function chamar(metodo) {
+    var g = jogo();
+    var args = Array.prototype.slice.call(arguments, 1);
+    if (!g || typeof g[metodo] !== 'function') return undefined;
+    try { return g[metodo].apply(g, args); }
+    catch (e) { log('⚠️ PulsyGame.' + metodo + ' lançou erro: ' + (e && e.message)); return undefined; }
+  }
+
+  function preparar(html) {
+    var i = html.search(/<head[^>]*>/i);
+    if (i < 0) return PREPARO + html;
+    var fim = html.indexOf('>', i) + 1;
+    return html.slice(0, fim) + PREPARO + html.slice(fim);
+  }
+  function carregar(html) {
+    htmlAtual = html; apertados = {};
+    iframe.srcdoc = preparar(html);
+    iframe.onload = function () {
+      var g = jogo();
+      log(g ? '✅ PulsyGame encontrado: ' + Object.keys(g).join(', ') : '⚠️ Sem window.PulsyGame: o Console usaria teclado/toque como reserva.');
+      try {
+        iframe.contentWindow.addEventListener('error', function (e) { log('❌ Erro no cartucho: ' + e.message); });
+      } catch (e) {}
+      if (sessao) mostrarRetomada();
+    };
+  }
+  function ajustarTamanho() {
+    var p = document.getElementById('tamanho').value.split('x');
+    iframe.width = p[0]; iframe.height = p[1];
+  }
+
+  // ── Botões ────────────────────────────────────────────────────────────────────
+  function apertar(nome, sim) {
+    if (!!apertados[nome] === sim) return;
+    apertados[nome] = sim;
+    document.querySelectorAll('[data-btn="' + nome + '"]').forEach(function (b) { b.classList.toggle('on', sim); });
+    if (pausadoPeloSistema) return;      // com o ⚙/⌂ aberto, o jogo não recebe botões
+    chamar('onButton', nome, sim);
+  }
+  document.querySelectorAll('[data-btn]').forEach(function (b) {
+    var nome = b.getAttribute('data-btn');
+    b.addEventListener('pointerdown', function (e) { e.preventDefault(); b.setPointerCapture(e.pointerId); apertar(nome, true); });
+    b.addEventListener('pointerup', function () { apertar(nome, false); });
+    b.addEventListener('pointercancel', function () { apertar(nome, false); });
+  });
+
+  // ── Analógicos: onAxis + direcional junto, zona morta 0,38 (como o Console) ─────
+  var dirEixo = '';
+  function eixoEsquerdo(x, y) {
+    if (pausadoPeloSistema) return;
+    chamar('onAxis', x, y);
+    var m = Math.hypot(x, y), dir = '';
+    if (m >= 0.38) {
+      var setores = ['right', 'downright', 'down', 'downleft', 'left', 'upleft', 'up', 'upright'];
+      var ang = Math.atan2(y, x) * 180 / Math.PI; if (ang < 0) ang += 360;
+      dir = setores[Math.round(ang / 45) % 8];
+    }
+    if (dir === dirEixo) return;
+    var antes = dirEixo; dirEixo = dir;
+    ['up', 'down', 'left', 'right'].forEach(function (d) {            // solta antes de apertar
+      if (antes.indexOf(d) >= 0 && dir.indexOf(d) < 0) chamar('onButton', d, false);
+    });
+    ['up', 'down', 'left', 'right'].forEach(function (d) {
+      if (dir.indexOf(d) >= 0 && antes.indexOf(d) < 0) chamar('onButton', d, true);
+    });
+  }
+  function eixoDireito(x, y) {
+    if (pausadoPeloSistema) return;
+    var g = jogo(); if (!g) return;
+    var fn = typeof g.onAxisRight === 'function' ? 'onAxisRight' : (typeof g.onAxis2 === 'function' ? 'onAxis2' : '');
+    if (fn) chamar(fn, x, y);
+  }
+  function montarStick(el, enviar) {
+    var bola = el.querySelector('i'), ativo = null;
+    function mover(e) {
+      var r = el.getBoundingClientRect();
+      var x = (e.clientX - (r.left + r.width / 2)) / (r.width / 2);
+      var y = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
+      var m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
+      bola.style.transform = 'translate(' + (x * 35) + 'px,' + (y * 35) + 'px)';
+      enviar(x, y);
+    }
+    el.addEventListener('pointerdown', function (e) { ativo = e.pointerId; el.setPointerCapture(e.pointerId); mover(e); });
+    el.addEventListener('pointermove', function (e) { if (ativo === e.pointerId) mover(e); });
+    function soltar() { ativo = null; bola.style.transform = ''; enviar(0, 0); }
+    el.addEventListener('pointerup', soltar); el.addEventListener('pointercancel', soltar);
+  }
+  montarStick(document.getElementById('stickE'), eixoEsquerdo);
+  montarStick(document.getElementById('stickD'), eixoDireito);
+
+  // ── Teclado ───────────────────────────────────────────────────────────────────
+  var TECLAS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    j: 'a', k: 'b', u: 'x', i: 'y', q: 'l', e: 'r', Enter: 'start', Shift: 'select' };
+  var wasd = { w: 0, a: 0, s: 0, d: 0 };
+  function eixoWasd() { eixoEsquerdo((wasd.d - wasd.a), (wasd.s - wasd.w)); }
+  document.addEventListener('keydown', function (e) {
+    if (e.target && e.target.tagName === 'SELECT') return;
+    var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (k === 'Escape') { e.preventDefault(); alternarEngrenagem(); return; }
+    if (k in wasd) { wasd[k] = 1; eixoWasd(); return; }
+    if (TECLAS[k]) { e.preventDefault(); apertar(TECLAS[k], true); }
+  });
+  document.addEventListener('keyup', function (e) {
+    var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (k in wasd) { wasd[k] = 0; eixoWasd(); return; }
+    if (TECLAS[k]) apertar(TECLAS[k], false);
+  });
+
+  // ── Sistema: ⚙ (pausa e volta) e ⌂ (salvar e sair / continuar / novo) ─────────
+  function soltarTudo() {
+    Object.keys(apertados).forEach(function (n) { if (apertados[n]) chamar('onButton', n, false); apertados[n] = false; });
+    document.querySelectorAll('.b.on').forEach(function (b) { b.classList.remove('on'); });
+    chamar('onAxis', 0, 0); dirEixo = '';
+  }
+  function abrir(html) { dialogo.innerHTML = html; dialogo.classList.add('on'); }
+  function fechar() { dialogo.classList.remove('on'); dialogo.innerHTML = ''; }
+
+  function alternarEngrenagem() {
+    if (!pausadoPeloSistema) {
+      soltarTudo(); pausadoPeloSistema = true; chamar('onPause', true); log('⚙ aberto → onPause(true)');
+      abrir('<b>⚙ Configurações do controle</b><button id="voltar">VOLTAR AO JOGO</button>');
+      document.getElementById('voltar').onclick = alternarEngrenagem;
+    } else {
+      fechar(); pausadoPeloSistema = false; chamar('onPause', false);
+      log('⚙ fechado → onPause(false): o jogo deve continuar PAUSADO com "Ⓐ para seguir"');
+    }
+  }
+  function home() {
+    soltarTudo(); pausadoPeloSistema = true; chamar('onPause', true);
+    abrir('<b>Salvar antes de sair?</b><div><button id="salvar">SALVAR E SAIR</button> '
+      + '<button id="semSalvar">SAIR SEM SALVAR</button> <button id="voltarJogo">VOLTAR AO JOGO</button></div>');
+    document.getElementById('salvar').onclick = function () {
+      var r = chamar('saveSession');
+      var exato = !!(r && r.exact !== false);
+      var resumo = r && typeof r.summary === 'string' ? r.summary.slice(0, 140) : 'Ponto seguro mais recente';
+      sessao = { exact: exato, summary: resumo };
+      log('💾 saveSession() → ' + JSON.stringify(sessao) + ' · recarregando o cartucho');
+      fechar(); pausadoPeloSistema = false; carregar(htmlAtual);
+    };
+    document.getElementById('semSalvar').onclick = function () {
+      sessao = null; fechar(); pausadoPeloSistema = false; log('Saiu sem salvar · recarregando'); carregar(htmlAtual);
+    };
+    document.getElementById('voltarJogo').onclick = function () { fechar(); pausadoPeloSistema = false; chamar('onPause', false); };
+  }
+  function mostrarRetomada() {
+    pausadoPeloSistema = true;
+    abrir('<b>Continuar?</b><div>' + sessao.summary + (sessao.exact ? '' : ' (ponto seguro)') + '</div>'
+      + '<div><button id="continuar">CONTINUAR</button> <button id="novo">NOVO JOGO</button></div>');
+    document.getElementById('continuar').onclick = function () {
+      fechar(); pausadoPeloSistema = false;
+      var ok = chamar('resumeSession');
+      if (ok === false) log('❌ resumeSession() devolveu false: o Console diria "Não consegui retomar esta sessão" e apagaria o índice');
+      else log('▶ resumeSession() → ok · o jogo deve estar PAUSADO com "Ⓐ para seguir"');
+      chamar('onPause', false); sessao = null;
+    };
+    document.getElementById('novo').onclick = function () {
+      fechar(); pausadoPeloSistema = false; chamar('newSession'); log('🆕 newSession() · recorde e preferências devem continuar'); sessao = null;
+    };
+  }
+  document.querySelector('[data-sis="engrenagem"]').addEventListener('click', alternarEngrenagem);
+  document.querySelector('[data-sis="home"]').addEventListener('click', home);
+
+  // ── Deck de armas (opcional) ──────────────────────────────────────────────────
+  var LISTA = ['pistol', 'shotgun', 'smg', 'rifle', 'flamer', 'launcher'];
+  var armasEl = document.getElementById('armas');
+  setInterval(function () {
+    var g = jogo(), r = null;
+    if (g && typeof g.getWeaponControls === 'function') { try { r = g.getWeaponControls(); } catch (e) { r = null; } }
+    if (!r || !r.enabled) { armasEl.innerHTML = ''; return; }
+    var liberadas = (Array.isArray(r.unlocked) ? r.unlocked : []).filter(function (id) { return LISTA.indexOf(id) >= 0; });
+    armasEl.innerHTML = liberadas.map(function (id) {
+      return '<button data-arma="' + id + '" class="' + (id === r.current ? 'atual' : '') + '">' + id + '</button>';
+    }).join('');
+    armasEl.querySelectorAll('[data-arma]').forEach(function (b) {
+      b.onclick = function () { var ok = chamar('selectWeapon', b.getAttribute('data-arma')); log('🔫 selectWeapon(' + b.getAttribute('data-arma') + ') → ' + ok); };
+    });
+  }, 500);
+
+  // ── Arquivo ───────────────────────────────────────────────────────────────────
+  document.getElementById('arquivo').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0]; if (!f) return;
+    f.text().then(function (t) { sessao = null; log('📂 ' + f.name + ' (' + Math.round(f.size / 1024) + ' KB)'); carregar(t); });
+  });
+  document.getElementById('recarregar').addEventListener('click', function () { if (htmlAtual) carregar(htmlAtual); });
+  document.getElementById('tamanho').addEventListener('change', ajustarTamanho);
+  ajustarTamanho();
+  log('Escolha um cartucho.html. Teclado: setas, WASD, J=A K=B U=X I=Y Q=L E=R Enter=+ Shift=− Esc=⚙');
+  // Com um servidor local: simulador.html?cartucho=../jogos/meu-jogo/cartucho.html
+  var pedido = new URLSearchParams(location.search).get('cartucho');
+  if (pedido) {
+    fetch(pedido).then(function (r) { return r.text(); })
+      .then(function (t) { log('📂 ' + pedido); carregar(t); })
+      .catch(function () { log('Não consegui abrir ' + pedido + ': use um servidor local (npx http-server) ou o botão de arquivo.'); });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "slug": "corrida-lunar",
+  "titulo": "Corrida Lunar",
+  "descricao": "Pilote um rover pela Lua desviando de crateras e colete cristais. Três modos de dificuldade e recorde salvo no aparelho.",
+  "autor": "Seu nome ou apelido",
+  "contato": "seu-usuario-no-github",
+  "versao": "1.0.0",
+  "idioma": ["pt-BR"],
+  "classificacao": "livre",
+  "usaAnalogicoDireito": false,
+  "usaDeckDeArmas": false,
+  "ferramentas": "Feito com ajuda de IA (Claude) e ajustes à mão",
+  "licenca": "todos os direitos reservados ao autor"
+}
