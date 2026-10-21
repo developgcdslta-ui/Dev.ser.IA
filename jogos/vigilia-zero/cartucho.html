@@ -704,14 +704,13 @@
     var angle = normalizeAngle(Math.atan2(dy, dx) - player.yaw), dist = e.renderDistance;
     if (Math.abs(angle) > FOV * 0.59 || dist < 0.15) return;
     var screenX = W * 0.5 + Math.tan(angle) * camera.focal;
-    if (screenX < -40 || screenX > W + 40) return;
-    var strip = Math.max(0, Math.min(COLS - 1, Math.floor(screenX / STRIP)));
-    if (zBuffer[strip] < dist - 0.18) return;
     var size = camera.focal / dist, height = size * 0.92, width = height * 0.56;
-    if (height < 2) return;
+    if (height < 2 || screenX + width * 0.5 <= 0 || screenX - width * 0.5 >= W) return;
     var foot = camera.horizon + size * 0.48;
     var top = foot - height, bob = Math.sin(seconds * 4 + e.phase) * Math.min(3, height * 0.04);
-    ctx.save(); ctx.translate(screenX, top + bob); ctx.scale(width / 44, height / 72);
+    ctx.save();
+    if (!clipVisibleColumns(screenX, width * 0.5, dist, 0.18)) { ctx.restore(); return; }
+    ctx.translate(screenX, top + bob); ctx.scale(width / 44, height / 72);
     ctx.globalAlpha = Math.max(0.32, 1 - dist / 20);
     ctx.fillStyle = '#07100f'; ctx.beginPath(); ctx.ellipse(22, 71, 19, 4, 0, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = e.type ? '#9a7952' : '#527c70'; ctx.lineWidth = 7; ctx.lineCap = 'round';
@@ -743,18 +742,39 @@
     var angle = normalizeAngle(Math.atan2(dy, dx) - player.yaw), dist = item.renderDistance;
     if (Math.abs(angle) > FOV * 0.59 || dist < 0.15) return;
     var screenX = W * 0.5 + Math.tan(angle) * camera.focal;
-    if (screenX < -24 || screenX > W + 24) return;
-    var strip = Math.max(0, Math.min(COLS - 1, Math.floor(screenX / STRIP)));
-    if (zBuffer[strip] < dist - 0.2) return;
     var size = Math.max(5, Math.min(26, camera.focal / dist * 0.12));
+    var halfWidth = size * 1.45;
+    if (screenX + halfWidth <= 0 || screenX - halfWidth >= W) return;
     var y = camera.horizon + camera.focal * 0.42 / dist - size * 0.6 + Math.sin(seconds * 2 + item.phase) * 2;
-    ctx.save(); ctx.translate(screenX, y); ctx.rotate(seconds * 0.35 + item.phase);
+    ctx.save();
+    if (!clipVisibleColumns(screenX, halfWidth, dist, 0.2)) { ctx.restore(); return; }
+    ctx.translate(screenX, y); ctx.rotate(seconds * 0.35 + item.phase);
     ctx.fillStyle = item.type === 'med' ? '#6fe2b0' : '#f1bd6b';
     ctx.globalAlpha = 0.23; ctx.beginPath(); ctx.arc(0, 0, size * 1.45, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 0.95; ctx.fillRect(-size * 0.65, -size * 0.65, size * 1.3, size * 1.3);
     ctx.fillStyle = '#102126'; ctx.fillRect(-size * 0.42, -size * 0.13, size * 0.84, size * 0.26);
     ctx.fillRect(-size * 0.13, -size * 0.42, size * 0.26, size * 0.84);
     ctx.restore();
+  }
+  function clipVisibleColumns(screenX, halfWidth, distance, tolerance) {
+    var first = Math.max(0, Math.floor((screenX - halfWidth) / STRIP));
+    var last = Math.min(COLS - 1, Math.floor((screenX + halfWidth) / STRIP));
+    if (first > last) return false;
+    var runStart = -1, visible = false;
+    ctx.beginPath();
+    for (var strip = first; strip <= last; strip++) {
+      if (zBuffer[strip] >= distance - tolerance) {
+        visible = true;
+        if (runStart < 0) runStart = strip;
+      } else if (runStart >= 0) {
+        ctx.rect(runStart * STRIP, 0, (strip - runStart) * STRIP, H);
+        runStart = -1;
+      }
+    }
+    if (runStart >= 0) ctx.rect(runStart * STRIP, 0, (last + 1 - runStart) * STRIP, H);
+    if (!visible) return false;
+    ctx.clip();
+    return true;
   }
   function sortSprites(a, b) { return b.renderDistance - a.renderDistance; }
   function drawSparks() {
