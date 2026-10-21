@@ -78,11 +78,11 @@
   ];
   var laterChapters = [
     { wave: 15, chapter: 'CAP. 06 · PARTIDA', short: 'PARTIDA',
-      lines: ['Nara: assinei após a equipe sair.', 'Ivo ficou no setor; não o vi na escotilha.'] },
+      lines: ['Nara: assinei após a saída.', 'Ivo ficou; não o vi na escotilha.'] },
     { wave: 18, chapter: 'CAP. 07 · REPETIÇÃO', short: 'REPETIÇÃO',
-      lines: ['Ivo: o sinal é gravação repetida, não voz ao vivo.', 'Cortei o quadro; a bateria mantém o repetidor.'] },
+      lines: ['Ivo: é gravação, não voz ao vivo.', 'A bateria mantém o repetidor.'] },
     { wave: 21, chapter: 'CAP. 08 · ROTA NORTE', short: 'ROTA NORTE',
-      lines: ['O farol mantém marcada a saída norte.', 'O protocolo fica no Arquivo; o turno continua.'] }
+      lines: ['O farol marca a saída norte.', 'Decida no Arquivo; o turno segue.'] }
   ];
   var storyChapters = transmissions.concat(laterChapters);
   var relays = [
@@ -146,10 +146,10 @@
   function preserveCorruptProgress(raw) {
     if (typeof raw !== 'string' || raw.length > 64 * 1024) return false;
     try {
-      if (localStorage.getItem(PROGRESS_BACKUP_KEY) === null) {
-        localStorage.setItem(PROGRESS_BACKUP_KEY, raw);
-      }
-      return true;
+      var previous = localStorage.getItem(PROGRESS_BACKUP_KEY);
+      if (previous !== null) return previous === raw;
+      localStorage.setItem(PROGRESS_BACKUP_KEY, raw);
+      return localStorage.getItem(PROGRESS_BACKUP_KEY) === raw;
     } catch (e) { return false; }
   }
   function loadProgress() {
@@ -161,12 +161,16 @@
         progressWritable = preserveCorruptProgress(raw);
         return emptyProgress();
       }
-      if (!data || typeof data !== 'object' || !Array.isArray(data.reles)) {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
         progressWritable = preserveCorruptProgress(raw);
         return emptyProgress();
       }
       if (data.versao !== 1) {
         progressWritable = false;
+        return emptyProgress();
+      }
+      if (!Array.isArray(data.reles)) {
+        progressWritable = preserveCorruptProgress(raw);
         return emptyProgress();
       }
       var savedRelays = [false, false, false, false, false];
@@ -934,22 +938,23 @@
     ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 8, 116, 54); ctx.fillRect(W - 130, 8, 122, 54);
     ctx.fillStyle = '#a9c1b5'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui'; ctx.textAlign = 'left';
     ctx.fillText('ONDA ' + String(wave).padStart(2, '0'), 16, 24, 100);
-    ctx.fillStyle = '#e7f0e9'; ctx.font = '700 ' + uiFontSize(14) + 'px system-ui';
+    ctx.fillStyle = '#e7f0e9'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui';
     ctx.fillText('ABATES  ' + String(kills).padStart(2, '0'), 16, 44, 104);
     ctx.fillStyle = '#a9c1b5'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui'; ctx.textAlign = 'right';
-    ctx.fillText('VIGOR  ' + Math.ceil(player.hp) + '%', W - 16, 24, 106);
+    ctx.fillText('VIDA  ' + Math.ceil(player.hp) + '%', W - 16, 24, 106);
     ctx.fillStyle = '#17252a'; ctx.fillRect(W - 118, 32, 100, 8);
     ctx.fillStyle = player.hp > 50 ? '#75d2a5' : player.hp > 25 ? '#e9b264' : '#e66f60';
     ctx.fillRect(W - 118, 32, 100 * player.hp / 100, 8);
     var stock = player.stocks[player.weapon];
     ctx.fillStyle = '#08151acc'; ctx.fillRect(W - 142, 68, 134, 50);
     ctx.textAlign = 'right'; ctx.fillStyle = '#b7cbc0'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui';
-    ctx.fillText(player.weapon === 'smg' ? 'SMG' : weaponNames[player.weapon], W - 16, 86, 114);
+    var weaponLabel = player.weapon === 'smg' ? 'SMG' : weaponNames[player.weapon];
+    ctx.fillText(weaponLabel, W - 16, 86, 114);
     ctx.fillStyle = '#f0f4ed'; ctx.font = '700 ' + uiFontSize(22) + 'px system-ui';
     ctx.fillText(String(stock.mag).padStart(2, '0') + ' / ' + stock.reserve, W - 16, 109, 116);
     ctx.textAlign = 'left'; ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 68, 94, 20);
     ctx.fillStyle = '#a9c1b5'; ctx.font = '700 ' + uiFontSize(12) + 'px system-ui';
-    ctx.fillText('CORRIDA', 14, 82, 48);
+    ctx.fillText('FÔLEGO', 14, 82, 48);
     ctx.fillStyle = '#20333a'; ctx.fillRect(66, 74, 30, 8);
     ctx.fillStyle = '#84d6af'; ctx.fillRect(66, 74, 30 * player.stamina / 100, 8);
     if (bannerTimer > 0 && transmissionTimer <= 0) {
@@ -976,7 +981,7 @@
       ctx.fillText(relayHint, W / 2, H - 15, W - 124);
     }
     if (activeTransmission >= 0 && transmissionTimer > 0) {
-      var transmission = storyChapters[activeTransmission], radioX = 8, radioY = 90, radioWidth = 204;
+      var transmission = storyChapters[activeTransmission], radioX = 8, radioY = 90, radioWidth = 240;
       var radioTitleSize = uiFontSize(12), radioLineSize = uiFontSize(13);
       var radioTitleY = radioY + radioTitleSize;
       var radioLine1Y = radioTitleY + radioLineSize + 2;
@@ -1058,12 +1063,12 @@
     ctx.fillStyle = '#d7b37a'; ctx.fillRect(W / 2 - 43, 158, 86, 2);
     drawText('A estação ficou em silêncio.', W / 2, 187, 14, '#d8e3d9');
     drawText('As luzes não vão durar para sempre.', W / 2, 205, 14, '#a9c0b3');
-    drawText('Explore painéis: aproxime-se e mire para sincronizar.', W / 2, 226, 12, '#9be0be');
+    drawText('Painéis: aproxime-se e mire; A sincroniza.', W / 2, 226, 12, '#9be0be');
     drawText('A ou +  ·  INICIAR TURNO', W / 2, 251, 15, '#f0c27c', 800);
     drawText('WASD / analógico move  ·  analógico direito mira', W / 2, 279, 12, '#b5c7bc');
-    drawText('A atira/sincroniza  ·  X recarrega  ·  B corre  ·  L/R arma  ·  − som', W / 2, 299, 12, '#b5c7bc');
-    drawText('L/R dificuldade: ' + difficultyNames[prefs.dificuldade] + '  ·  melhor onda ' + prefs.melhorOnda +
-      '  ·  recorde ' + prefs.melhorAbates + (prefs.som ? '  ·  SOM ON' : '  ·  SOM OFF'),
+    drawText('A atira · X recarrega · B corre · L/R arma · − som', W / 2, 299, 12, '#b5c7bc');
+    drawText('L/R: ' + difficultyNames[prefs.dificuldade] + ' · onda ' + prefs.melhorOnda +
+      ' · abates ' + prefs.melhorAbates + (prefs.som ? ' · som ON' : ' · som OFF'),
       W / 2, 323, 12, '#8da69a');
     ctx.textAlign = 'left';
   }
