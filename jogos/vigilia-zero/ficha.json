@@ -1,10 +1,10 @@
 {
   "slug": "vigilia-zero",
   "titulo": "Vigília Zero",
-  "descricao": "Sobreviva às ondas de criaturas na estação Boreal. Explore corredores, administre munição e desbloqueie armas para resistir à noite.",
+  "descricao": "Sobreviva às ondas na estação Boreal, recupere transmissões e reconstrua a história nos capítulos do arquivo. Explore corredores, administre munição e desbloqueie armas.",
   "autor": "developgcdslta-ui",
   "contato": "developgcdslta-ui",
-  "versao": "1.0.0",
+  "versao": "1.1.0",
   "idioma": ["pt-BR"],
   "classificacao": "12",
   "usaAnalogicoDireito": true,

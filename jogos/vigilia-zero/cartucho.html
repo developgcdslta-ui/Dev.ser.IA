@@ -57,8 +57,21 @@
   var movementInput = { x: 0, y: 0 }, cameraState = { horizon: 0, focal: 0 };
   var ignoreAUntilRelease = false, rafId = 0, lastFrame = 0, rng = 8213907;
   var audio = null, recoil = 0, flash = 0, damageFlash = 0, message = '', messageTimer = 0;
-  var pause = { option: 0, confirm: '', confirmUntil: 0, follow: false };
-  var pauseOptions = ['Continuar', 'Som', 'Ajuda', 'Recomeçar', 'Menu'];
+  var activeTransmission = -1, transmissionTimer = 0;
+  var pause = { option: 0, confirm: '', confirmUntil: 0, follow: false, archive: false, archiveIndex: 0 };
+  var pauseOptions = ['Continuar', 'Som', 'Ajuda', 'Arquivo', 'Recomeçar', 'Menu'];
+  var transmissions = [
+    { wave: 1, chapter: 'CAP. 01 · SILÊNCIO', short: 'SILÊNCIO',
+      lines: ['Nara: Boreal ficou muda.', 'O sinal veio do setor 09.'] },
+    { wave: 3, chapter: 'CAP. 02 · ECO', short: 'ECO',
+      lines: ['O alarme chama por nomes.', 'Não responda pelo intercom.'] },
+    { wave: 6, chapter: 'CAP. 03 · GERADOR', short: 'GERADOR',
+      lines: ['Ivo: gerador intacto.', 'Cortaram a energia por dentro.'] },
+    { wave: 9, chapter: 'CAP. 04 · ASSINATURA', short: 'ASSINATURA',
+      lines: ['Nara: assinei a evacuação.', 'Depois que todos já tinham saído.'] },
+    { wave: 12, chapter: 'CAP. 05 · VIGÍLIA', short: 'VIGÍLIA',
+      lines: ['Ivo: a escotilha norte abre.', 'Fiquei para manter o sinal.'] }
+  ];
   var difficultyNames = ['CALMA', 'PADRÃO', 'INTENSA'];
   var weaponOrder = ['pistol', 'shotgun', 'smg', 'rifle'];
   var weaponNames = { pistol: 'PISTOLA', shotgun: 'ESCOPETA', smg: 'SUBMETRALHADORA', rifle: 'FUZIL' };
@@ -265,11 +278,34 @@
       reloadWeapon: '', invulnerable: 0, bob: 0, hurt: 0
     };
     wave = 1; kills = 0; seconds = 0; spawnLeft = 4; spawnTimer = 0.5;
+    activeTransmission = -1; transmissionTimer = 0; discoverTransmission(wave);
     waveDelay = 0; bannerTimer = 2.8; recoil = 0; flash = 0; damageFlash = 0;
     enemies.length = 0; pickups.length = 0; sparks.length = 0; sprites.length = 0;
-    state = 'jogando'; pause.follow = false; pause.confirm = '';
+    state = 'jogando'; pause.follow = false; pause.archive = false; pause.confirm = '';
     ignoreAUntilRelease = !!held.a; gameOverLock = 0;
     removeKey(SAVE_KEY); createAudio(); syncAudio(); saveSessionState(); draw(); startLoop();
+  }
+  function unlockedTransmissions() {
+    var found = [];
+    for (var i = 0; i < transmissions.length; i++) {
+      if (wave >= transmissions[i].wave) found.push(transmissions[i]);
+    }
+    return found;
+  }
+  function discoverTransmission(waveNumber) {
+    for (var i = 0; i < transmissions.length; i++) {
+      if (transmissions[i].wave === waveNumber) {
+        activeTransmission = i; transmissionTimer = 7;
+        return;
+      }
+    }
+  }
+  function currentChapter() {
+    var chapter = transmissions[0];
+    for (var i = 0; i < transmissions.length; i++) {
+      if (wave >= transmissions[i].wave) chapter = transmissions[i];
+    }
+    return chapter;
   }
   function unlockWeapons() {
     var unlockAt = { shotgun: 2, smg: 4, rifle: 6 };
@@ -336,7 +372,9 @@
         },
         wave: wave, kills: kills, seconds: seconds, spawnLeft: spawnLeft, spawnTimer: spawnTimer,
         waveDelay: waveDelay, bannerTimer: bannerTimer, rng: rng,
-        enemies: enemies, pickups: pickups, sparks: sparks, message: message, messageTimer: messageTimer
+        enemies: enemies, pickups: pickups, sparks: sparks, message: message, messageTimer: messageTimer,
+        transmissionWave: activeTransmission >= 0 ? transmissions[activeTransmission].wave : 0,
+        transmissionTimer: transmissionTimer
       };
       mode = 'jogando';
     }
@@ -367,6 +405,12 @@
       hurt: finiteNumber(p.hurt, 0, 0, 1)
     };
     wave = finiteNumber(data.wave, 1, 1, 999); kills = finiteNumber(data.kills, 0, 0, 999999);
+    activeTransmission = -1;
+    var savedTransmissionWave = finiteNumber(data.transmissionWave, 0, 0, 12);
+    for (var ti = 0; ti < transmissions.length; ti++) {
+      if (transmissions[ti].wave === savedTransmissionWave && transmissions[ti].wave <= wave) activeTransmission = ti;
+    }
+    transmissionTimer = activeTransmission >= 0 ? finiteNumber(data.transmissionTimer, 0, 0, 7) : 0;
     seconds = finiteNumber(data.seconds, 0, 0, 1e8); spawnLeft = finiteNumber(data.spawnLeft, 0, 0, 20);
     spawnTimer = finiteNumber(data.spawnTimer, 0, 0, 5); waveDelay = finiteNumber(data.waveDelay, 0, 0, 10);
     bannerTimer = finiteNumber(data.bannerTimer, 0, 0, 4); rng = finiteNumber(data.rng, 8213907, 0, 4294967295) >>> 0;
@@ -399,6 +443,7 @@
     message = typeof data.message === 'string' ? data.message.slice(0, 40) : '';
     messageTimer = finiteNumber(data.messageTimer, 0, 0, 4);
     state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.follow = true;
+    pause.archive = false; pause.archiveIndex = 0;
     syncAudio(); draw(); return true;
   }
   function saveSummary() {
@@ -616,24 +661,37 @@
     ctx.fillRect(W - 118, 32, 100 * player.hp / 100, 8);
     var stock = player.stocks[player.weapon];
     ctx.fillStyle = '#08151acc'; ctx.fillRect(W - 142, 68, 134, 50);
-    ctx.textAlign = 'right'; ctx.fillStyle = '#b7cbc0'; ctx.font = '700 11px system-ui';
+    ctx.textAlign = 'right'; ctx.fillStyle = '#b7cbc0'; ctx.font = '700 12px system-ui';
     ctx.fillText(weaponNames[player.weapon], W - 16, 86);
     ctx.fillStyle = '#f0f4ed'; ctx.font = '700 22px system-ui';
     ctx.fillText(String(stock.mag).padStart(2, '0') + ' / ' + stock.reserve, W - 16, 109);
     ctx.textAlign = 'left'; ctx.fillStyle = '#08151acc'; ctx.fillRect(8, 68, 94, 20);
-    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 11px system-ui'; ctx.fillText('CORRIDA', 14, 82);
+    ctx.fillStyle = '#a9c1b5'; ctx.font = '700 12px system-ui'; ctx.fillText('CORRIDA', 14, 82);
     ctx.fillStyle = '#20333a'; ctx.fillRect(66, 74, 30, 8);
     ctx.fillStyle = '#84d6af'; ctx.fillRect(66, 74, 30 * player.stamina / 100, 8);
     if (bannerTimer > 0) {
       ctx.globalAlpha = Math.min(1, bannerTimer, (2.8 - bannerTimer) * 2 + 0.35);
       ctx.fillStyle = '#071318c9'; ctx.fillRect(68, H * 0.25, W - 136, 42);
-      ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 17px system-ui';
-      ctx.fillText('ONDA ' + String(wave).padStart(2, '0') + '  //  CONTENÇÃO', W / 2, H * 0.25 + 26);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 14px system-ui';
+      ctx.fillText('ONDA ' + String(wave).padStart(2, '0') + '  ·  CAP. ' +
+        String(transmissions.indexOf(currentChapter()) + 1).padStart(2, '0') + ' · ' + currentChapter().short,
+        W / 2, H * 0.25 + 26);
       ctx.globalAlpha = 1;
     }
     if (messageTimer > 0) {
       ctx.textAlign = 'center'; ctx.fillStyle = '#a9f0cd'; ctx.font = '700 14px system-ui';
       ctx.fillText(message, W / 2, H * 0.62);
+    }
+    if (activeTransmission >= 0 && transmissionTimer > 0) {
+      var transmission = transmissions[activeTransmission], radioY = H * 0.415;
+      ctx.globalAlpha = Math.min(1, transmissionTimer, (7 - transmissionTimer) * 2 + 0.35);
+      ctx.fillStyle = '#061015e8'; ctx.fillRect(28, radioY, W - 56, 61);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 12px system-ui';
+      ctx.fillText(transmission.chapter + ' · ONDA ' + String(transmission.wave).padStart(2, '0'), W / 2, radioY + 17);
+      ctx.fillStyle = '#e4f0e9'; ctx.font = '700 13px system-ui';
+      ctx.fillText(transmission.lines[0], W / 2, radioY + 37);
+      ctx.fillText(transmission.lines[1], W / 2, radioY + 53);
+      ctx.globalAlpha = 1;
     }
     ctx.textAlign = 'left';
   }
@@ -709,6 +767,7 @@
     ctx.textAlign = 'left';
   }
   function drawPause() {
+    if (pause.archive && !pause.follow) { drawArchive(); return; }
     ctx.fillStyle = '#040a0cce'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#101d22'; ctx.fillRect(44, 36, W - 88, H - 72);
     ctx.strokeStyle = '#708d80'; ctx.strokeRect(45, 37, W - 90, H - 74);
@@ -720,13 +779,38 @@
       for (var i = 0; i < pauseOptions.length; i++) {
         var label = pauseOptions[i];
         if (label === 'Som') label += ': ' + (prefs.som ? 'ligado' : 'desligado');
+        if (label === 'Arquivo') label += ' (' + unlockedTransmissions().length + ')';
         if (pause.confirm === pauseOptions[i]) label = 'A DE NOVO PARA ' + (label === 'Menu' ? 'SAIR' : 'RECOMEÇAR');
-        drawText((pause.option === i ? '›  ' : '   ') + label, W / 2, 112 + i * 25, 15,
+        drawText((pause.option === i ? '›  ' : '   ') + label, W / 2, 111 + i * 21, 14,
           pause.option === i ? '#9be0be' : '#d8e3d9', 700);
       }
-      drawText('RECOMEÇAR E MENU PEDEM CONFIRMAÇÃO', W / 2, 237, 11, '#beaa86');
+      drawText('RECOMEÇAR E MENU PEDEM CONFIRMAÇÃO', W / 2, 249, 12, '#beaa86');
     }
-    drawText('↑↓ escolher  ·  A confirmar  ·  B/+ voltar  ·  − som', W / 2, 88, 11, '#a9bcb0');
+    drawText('↑↓ navegar · A confirmar · B/+ voltar · − som', W / 2, 88, 12, '#a9bcb0');
+    ctx.textAlign = 'left';
+  }
+  function drawArchive() {
+    var found = unlockedTransmissions();
+    if (pause.archiveIndex >= found.length) pause.archiveIndex = Math.max(0, found.length - 1);
+    ctx.fillStyle = '#040a0cce'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#101d22'; ctx.fillRect(22, 24, W - 44, H - 48);
+    ctx.strokeStyle = '#708d80'; ctx.strokeRect(23, 25, W - 46, H - 50);
+    drawText('ARQUIVO DE BOREAL', W / 2, 57, 20, '#e8c58a', 800);
+    drawText('↑↓ ler  ·  A/B pausa  ·  + seguir  ·  − som', W / 2, 82, 12, '#a9bcb0');
+    ctx.fillStyle = '#34484a'; ctx.fillRect(48, 98, W - 96, 1);
+    if (found.length) {
+      var entry = found[pause.archiveIndex];
+      drawText('TRANSMISSÃO ' + String(entry.wave).padStart(2, '0') + '  ·  ' +
+        (pause.archiveIndex + 1) + '/' + found.length, W / 2, 130, 13, '#9be0be', 800);
+      drawText(entry.chapter, W / 2, 166, 17, '#e5bb7b', 800);
+      ctx.fillStyle = '#34484a'; ctx.fillRect(72, 185, W - 144, 1);
+      drawText('“' + entry.lines[0] + '”', W / 2, 222, 15, '#e4f0e9');
+      drawText('“' + entry.lines[1] + '”', W / 2, 248, 15, '#e4f0e9');
+      drawText('SINAL RECUPERADO NO SETOR 09', W / 2, 282, 12, '#a9bcb0');
+    } else {
+      drawText('Nenhuma transmissão encontrada.', W / 2, 202, 13, '#d8e3d9');
+    }
+    drawText('A/B voltar à pausa  ·  + fechar e seguir', W / 2, 315, 12, '#a9bcb0');
     ctx.textAlign = 'left';
   }
   function drawEnd() {
@@ -824,12 +908,12 @@
   }
   function openPause(follow) {
     if (state !== 'jogando' && state !== 'pausa') return;
-    state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.follow = !!follow;
+    state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.follow = !!follow; pause.archive = false;
     releaseAll(); stopLoop(); syncAudio(); saveSessionState(); draw();
   }
   function closePause() {
     if (state !== 'pausa' || pause.follow) return;
-    state = 'jogando'; pause.confirm = ''; ignoreAUntilRelease = !!held.a;
+    state = 'jogando'; pause.confirm = ''; pause.archive = false; ignoreAUntilRelease = !!held.a;
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function choosePause() {
@@ -837,6 +921,9 @@
     if (selected === 'Continuar') { closePause(); return; }
     if (selected === 'Som') { toggleSound(); return; }
     if (selected === 'Ajuda') { message = 'A: atirar  ·  B: correr  ·  X: recarregar'; messageTimer = 2.8; draw(); return; }
+    if (selected === 'Arquivo') {
+      pause.archiveIndex = Math.max(0, unlockedTransmissions().length - 1); pause.archive = true; draw(); return;
+    }
     if (pause.confirm === selected && now < pause.confirmUntil) {
       if (selected === 'Recomeçar') startGame();
       else {
@@ -876,6 +963,17 @@
         if (name === 'a' || name === 'start') closeFollowPause();
         return;
       }
+      if (pause.archive) {
+        var archiveCount = unlockedTransmissions().length;
+        if (name === 'up' && archiveCount) {
+          pause.archiveIndex = (pause.archiveIndex + archiveCount - 1) % archiveCount; draw();
+        } else if (name === 'down' && archiveCount) {
+          pause.archiveIndex = (pause.archiveIndex + 1) % archiveCount; draw();
+        } else if (name === 'a' || name === 'b') {
+          pause.archive = false; draw();
+        } else if (name === 'start') closePause();
+        return;
+      }
       if (name === 'up') { pause.option = (pause.option + pauseOptions.length - 1) % pauseOptions.length; pause.confirm = ''; draw(); }
       else if (name === 'down') { pause.option = (pause.option + 1) % pauseOptions.length; pause.confirm = ''; draw(); }
       else if (name === 'a') choosePause();
@@ -892,7 +990,7 @@
   var gameOverLock = 0;
   function closeFollowPause() {
     if (state !== 'pausa' || !pause.follow) return;
-    pause.follow = false; state = 'jogando'; ignoreAUntilRelease = !!held.a;
+    pause.follow = false; pause.archive = false; state = 'jogando'; ignoreAUntilRelease = !!held.a;
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function getMovement() {
@@ -936,6 +1034,7 @@
     if (held.a && player.cooldown <= 0 && !ignoreAUntilRelease) shoot();
     recoil = Math.max(0, recoil - dt * 1.8); flash = Math.max(0, flash - dt); damageFlash = Math.max(0, damageFlash - dt);
     bannerTimer = Math.max(0, bannerTimer - dt); messageTimer = Math.max(0, messageTimer - dt);
+    transmissionTimer = Math.max(0, transmissionTimer - dt);
 
     if (spawnLeft > 0) {
       spawnTimer -= dt;
@@ -947,7 +1046,7 @@
       if (waveDelay <= 0) waveDelay = 3.2;
       waveDelay -= dt;
       if (waveDelay <= 0) {
-        wave++; unlockWeapons(); spawnLeft = Math.min(14, 3 + wave * 2);
+        wave++; unlockWeapons(); discoverTransmission(wave); spawnLeft = Math.min(14, 3 + wave * 2);
         spawnTimer = 0.3; waveDelay = 0; bannerTimer = 2.8; sound('wave');
         if (wave > prefs.melhorOnda) { prefs.melhorOnda = wave; savePrefs(); }
       }
