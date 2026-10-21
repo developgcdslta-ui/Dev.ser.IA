@@ -38,7 +38,7 @@
   <div class="acoes" aria-label="Ações">
     <button data-pulsy-button="l" aria-label="Arma anterior">L</button><button data-pulsy-button="x" aria-label="Recarregar">X</button><button data-pulsy-button="r" aria-label="Próxima arma">R</button>
     <button data-pulsy-button="select" aria-label="Som">−</button><button data-pulsy-button="y" aria-label="Trocar arma">Y</button><button data-pulsy-button="start" aria-label="Pausar">+</button>
-    <button data-pulsy-button="b" aria-label="Correr">B</button><span class="vazio"></span><button data-pulsy-button="a" aria-label="Atirar">A</button>
+    <button data-pulsy-button="b" aria-label="Correr">B</button><span class="vazio"></span><button data-pulsy-button="a" aria-label="Atirar ou sincronizar painel">A</button>
   </div>
 </div>
 <script>
@@ -52,13 +52,17 @@
   var state = 'menu', player = null, wave = 0, kills = 0, seconds = 0;
   var spawnLeft = 0, spawnTimer = 0, waveDelay = 0, bannerTimer = 0;
   var enemies = [], pickups = [], sparks = [], sprites = [], dust = [], floorMarks = [];
-  var zBuffer = new Float32Array(COLS), rayHit = { distance: 0, tile: 1, side: 0, u: 0 };
+  var zBuffer = new Float32Array(COLS), rayHit = { distance: 0, tile: 1, side: 0, u: 0, row: 0, col: 0 };
   var held = Object.create(null), leftAxis = { x: 0, y: 0 }, rightAxis = { x: 0, y: 0 };
   var movementInput = { x: 0, y: 0 }, cameraState = { horizon: 0, focal: 0 };
   var ignoreAUntilRelease = false, rafId = 0, lastFrame = 0, rng = 8213907;
   var audio = null, recoil = 0, flash = 0, damageFlash = 0, message = '', messageTimer = 0;
   var activeTransmission = -1, transmissionTimer = 0;
-  var pause = { option: 0, confirm: '', confirmUntil: 0, follow: false, help: false, archive: false, archiveIndex: 0 };
+  var pause = {
+    option: 0, confirm: '', confirmUntil: 0, follow: false, help: false, archive: false,
+    archiveIndex: 0, archiveMode: 'records', archiveLockUntil: 0,
+    archiveConfirm: '', archiveConfirmUntil: 0, protocolIndex: 0, protocolStatus: ''
+  };
   var pauseOptions = ['Continuar', 'Som', 'Ajuda', 'Arquivo', 'Recomeçar', 'Menu'];
   var transmissions = [
     { wave: 1, chapter: 'CAP. 01 · SILÊNCIO', short: 'SILÊNCIO',
@@ -72,6 +76,38 @@
     { wave: 12, chapter: 'CAP. 05 · VIGÍLIA', short: 'VIGÍLIA',
       lines: ['Ivo: a escotilha norte abre.', 'Fiquei para manter o sinal.'] }
   ];
+  var laterChapters = [
+    { wave: 15, chapter: 'CAP. 06 · PARTIDA', short: 'PARTIDA',
+      lines: ['Nara: assinei após a equipe sair.', 'Ivo ficou no setor; não o vi na escotilha.'] },
+    { wave: 18, chapter: 'CAP. 07 · REPETIÇÃO', short: 'REPETIÇÃO',
+      lines: ['Ivo: o sinal é gravação repetida, não voz ao vivo.', 'Cortei o quadro; a bateria mantém o repetidor.'] },
+    { wave: 21, chapter: 'CAP. 08 · ROTA NORTE', short: 'ROTA NORTE',
+      lines: ['O farol mantém marcada a saída norte.', 'O protocolo fica no Arquivo; o turno continua.'] }
+  ];
+  var relays = [
+    { row: 2, col: 4, wave: 1, label: 'RELÉ 01', readyHint: 'A SINCRONIZA · RELÉ 01',
+      lockedHint: 'RELÉ 01 · LIBERA NA ONDA 01', syncedHint: 'RELÉ 01 · REGISTRO NO ARQUIVO',
+      title: 'RELÉ 01 · LISTA DE SAÍDA',
+      lines: ['A assinatura de Nara veio após a evacuação.', 'A planilha não diz quem voltou.'] },
+    { row: 3, col: 11, wave: 3, label: 'RELÉ 02', readyHint: 'A SINCRONIZA · RELÉ 02',
+      lockedHint: 'RELÉ 02 · LIBERA NA ONDA 03', syncedHint: 'RELÉ 02 · REGISTRO NO ARQUIVO',
+      title: 'RELÉ 02 · QUADRO AUXILIAR',
+      lines: ['Ivo isolou o quadro interno.', 'O corte conteve o alarme no corredor.'] },
+    { row: 5, col: 4, wave: 6, label: 'RELÉ 03', readyHint: 'A SINCRONIZA · RELÉ 03',
+      lockedHint: 'RELÉ 03 · LIBERA NA ONDA 06', syncedHint: 'RELÉ 03 · REGISTRO NO ARQUIVO',
+      title: 'RELÉ 03 · REPETIDOR',
+      lines: ['A voz foi gravada antes do blecaute.', 'A bateria mantém o repetidor ativo.'] },
+    { row: 10, col: 11, wave: 9, label: 'RELÉ 04', readyHint: 'A SINCRONIZA · RELÉ 04',
+      lockedHint: 'RELÉ 04 · LIBERA NA ONDA 09', syncedHint: 'RELÉ 04 · REGISTRO NO ARQUIVO',
+      title: 'RELÉ 04 · MARCAÇÃO NORTE',
+      lines: ['O farol aponta para a escotilha norte.', 'Sem luz, a rota some no corredor.'] },
+    { row: 12, col: 11, wave: 12, label: 'RELÉ 05', readyHint: 'A SINCRONIZA · RELÉ 05',
+      lockedHint: 'RELÉ 05 · LIBERA NA ONDA 12', syncedHint: 'RELÉ 05 · REGISTRO NO ARQUIVO',
+      title: 'RELÉ 05 · REGISTRO DE TURNO',
+      lines: ['Ivo permaneceu por escolha própria.', 'O ciclo pode ser mantido ou interrompido.'] }
+  ];
+  var protocolOptions = ['manter', 'encerrar'];
+  var protocolLabels = ['Manter o farol', 'Encerrar o ciclo'];
   var difficultyNames = ['CALMA', 'PADRÃO', 'INTENSA'];
   var weaponOrder = ['pistol', 'shotgun', 'smg', 'rifle'];
   var weaponNames = { pistol: 'PISTOLA', shotgun: 'ESCOPETA', smg: 'SUBMETRALHADORA', rifle: 'FUZIL' };
@@ -95,6 +131,7 @@
 
   var PREF_KEY = 'vigilia-zero.prefs.v1';
   var SAVE_KEY = 'vigilia-zero.partida.v1';
+  var PROGRESS_KEY = 'vigilia-zero.progresso.v1';
   function readJson(key) {
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
   }
@@ -102,6 +139,33 @@
     try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
   }
   function removeKey(key) { try { localStorage.removeItem(key); } catch (e) {} }
+  function emptyProgress() { return { versao: 1, reles: [false, false, false, false, false], protocolo: '' }; }
+  var progressWritable = true;
+  function loadProgress() {
+    try {
+      var raw = localStorage.getItem(PROGRESS_KEY);
+      if (raw === null) return emptyProgress();
+      var data = JSON.parse(raw);
+      if (!data || data.versao !== 1 || !Array.isArray(data.reles)) {
+        progressWritable = false;
+        return emptyProgress();
+      }
+      var savedRelays = [false, false, false, false, false];
+      for (var i = 0; i < savedRelays.length; i++) savedRelays[i] = data.reles[i] === true;
+      return {
+        versao: 1, reles: savedRelays,
+        protocolo: data.protocolo === 'manter' || data.protocolo === 'encerrar' ? data.protocolo : ''
+      };
+    } catch (e) {
+      progressWritable = false;
+      return emptyProgress();
+    }
+  }
+  var progress = loadProgress();
+  function saveProgress() {
+    if (!progressWritable) return false;
+    return writeJson(PROGRESS_KEY, progress);
+  }
   function finiteNumber(value, fallback, min, max) {
     var n = Number(value);
     return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
@@ -315,6 +379,7 @@
     waveDelay = 0; bannerTimer = 2.8; recoil = 0; flash = 0; damageFlash = 0;
     enemies.length = 0; pickups.length = 0; sparks.length = 0; sprites.length = 0;
     state = 'jogando'; pause.follow = false; pause.help = false; pause.archive = false;
+    pause.archiveMode = 'records'; pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
     pause.confirm = ''; pause.confirmUntil = 0;
     ignoreAUntilRelease = !!held.a; gameOverLock = 0;
     removeKey(SAVE_KEY); createAudio(); syncAudio(); saveSessionState(); draw(); startLoop();
@@ -323,6 +388,23 @@
     var found = [];
     for (var i = 0; i < transmissions.length; i++) {
       if (wave >= transmissions[i].wave) found.push(transmissions[i]);
+    }
+    return found;
+  }
+  function archiveEntries() {
+    var found = unlockedTransmissions();
+    for (var i = 0; i < laterChapters.length; i++) {
+      if (wave >= laterChapters[i].wave) found.push(laterChapters[i]);
+    }
+    if (wave >= 21) found.push({
+      wave: 21, chapter: 'PROTOCOLOS DO FAROL', short: 'PROTOCOLOS',
+      lines: ['Registro narrativo, sem encerrar a partida.', 'A onda continua após a escolha.'], protocols: true
+    });
+    for (var j = 0; j < relays.length; j++) {
+      if (progress.reles[j]) found.push({
+        wave: relays[j].wave, chapter: relays[j].title, short: 'RELÉ ' + String(j + 1).padStart(2, '0'),
+        lines: relays[j].lines, relay: true
+      });
     }
     return found;
   }
@@ -398,7 +480,7 @@
     var snapshot = null, mode = state;
     if (player && (state === 'jogando' || state === 'pausa')) {
       snapshot = {
-        versao: 1, jogador: {
+        versao: 2, jogador: {
           x: player.x, y: player.y, yaw: player.yaw, pitch: player.pitch, hp: player.hp,
           stamina: player.stamina, weapon: player.weapon, stocks: player.stocks,
           cooldown: player.cooldown, reloadTime: player.reloadTime, reloadWeapon: player.reloadWeapon,
@@ -408,15 +490,27 @@
         waveDelay: waveDelay, bannerTimer: bannerTimer, rng: rng,
         enemies: enemies, pickups: pickups, sparks: sparks, message: message, messageTimer: messageTimer,
         transmissionWave: activeTransmission >= 0 ? transmissions[activeTransmission].wave : 0,
-        transmissionTimer: transmissionTimer
+        transmissionTimer: transmissionTimer, reles: progress.reles.slice(), protocolo: progress.protocolo
       };
       mode = 'jogando';
     }
-    return writeJson(SAVE_KEY, { versao: 1, modo: mode, jogo: snapshot, kills: kills, wave: wave });
+    return writeJson(SAVE_KEY, { versao: 2, modo: mode, jogo: snapshot, kills: kills, wave: wave });
   }
   function restoreGame(data) {
-    if (!data || data.versao !== 1 || !data.jogador || !Array.isArray(data.enemies) ||
+    if (!data || (data.versao !== 1 && data.versao !== 2) || !data.jogador || !Array.isArray(data.enemies) ||
         !Array.isArray(data.pickups) || !Array.isArray(data.sparks)) return false;
+    var progressChanged = false;
+    if (Array.isArray(data.reles)) {
+      for (var relayIndex = 0; relayIndex < relays.length; relayIndex++) {
+        if (data.reles[relayIndex] === true && !progress.reles[relayIndex]) {
+          progress.reles[relayIndex] = true; progressChanged = true;
+        }
+      }
+    }
+    if (!progress.protocolo && (data.protocolo === 'manter' || data.protocolo === 'encerrar')) {
+      progress.protocolo = data.protocolo; progressChanged = true;
+    }
+    if (progressChanged) saveProgress();
     var p = data.jogador;
     var px = finiteNumber(p.x, 8.5, 1.2, 14.8), py = finiteNumber(p.y, 8.5, 1.2, 14.8);
     if (!canStand(px, py, 0.22)) { px = 8.5; py = 8.5; }
@@ -478,6 +572,8 @@
     messageTimer = finiteNumber(data.messageTimer, 0, 0, 4);
     state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.confirmUntil = 0;
     pause.follow = true; pause.help = false; pause.archive = false; pause.archiveIndex = 0;
+    pause.archiveMode = 'records'; pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
+    pause.archiveLockUntil = 0;
     syncAudio(); draw(); return true;
   }
   function saveSummary() {
@@ -505,7 +601,8 @@
     var hitCoord = side === 0 ? player.y + dist * rayY : player.x + dist * rayX;
     var u = hitCoord - Math.floor(hitCoord);
     if ((side === 0 && rayX > 0) || (side === 1 && rayY < 0)) u = 1 - u;
-    rayHit.distance = dist; rayHit.tile = mapY < 0 || mapY >= MAP.length || mapX < 0 || mapX >= MAP[0].length
+    rayHit.distance = dist; rayHit.row = mapY; rayHit.col = mapX;
+    rayHit.tile = mapY < 0 || mapY >= MAP.length || mapX < 0 || mapX >= MAP[0].length
       ? 1 : Math.max(1, MAP[mapY][mapX].charCodeAt(0) - 48);
     rayHit.side = side; rayHit.u = u;
     return rayHit;
@@ -766,6 +863,16 @@
       ctx.textAlign = 'center'; ctx.fillStyle = '#a9f0cd'; ctx.font = '700 ' + uiFontSize(14) + 'px system-ui';
       ctx.fillText(message, W / 2, H * 0.62, W - 32);
     }
+    var aimedRelay = relayAtAim();
+    if (aimedRelay >= 0) {
+      var relay = relays[aimedRelay];
+      var relayHint = progress.reles[aimedRelay] ? relay.syncedHint :
+        wave < relay.wave ? relay.lockedHint : relay.readyHint;
+      ctx.fillStyle = '#061015d9'; ctx.fillRect(56, H - 31, W - 112, 23);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#9be0be';
+      ctx.font = '800 ' + uiFontSize(12) + 'px system-ui';
+      ctx.fillText(relayHint, W / 2, H - 15, W - 124);
+    }
     if (activeTransmission >= 0 && transmissionTimer > 0) {
       var transmission = transmissions[activeTransmission], radioX = 8, radioY = 90, radioWidth = 204;
       var radioTitleSize = uiFontSize(12), radioLineSize = uiFontSize(13);
@@ -848,10 +955,11 @@
     drawText('ZERO', W / 2, 146, 24, '#83d1ae', 800);
     ctx.fillStyle = '#d7b37a'; ctx.fillRect(W / 2 - 43, 158, 86, 2);
     drawText('A estação ficou em silêncio.', W / 2, 187, 14, '#d8e3d9');
-    drawText('As luzes não vão durar para sempre.', W / 2, 208, 14, '#a9c0b3');
-    drawText('A ou +  ·  INICIAR TURNO', W / 2, 247, 15, '#f0c27c', 800);
-    drawText('WASD / analógico move  ·  analógico direito mira', W / 2, 276, 12, '#b5c7bc');
-    drawText('A atira  ·  X recarrega  ·  B corre  ·  L/R arma  ·  − som', W / 2, 296, 12, '#b5c7bc');
+    drawText('As luzes não vão durar para sempre.', W / 2, 205, 14, '#a9c0b3');
+    drawText('Explore painéis: aproxime-se e mire para sincronizar.', W / 2, 226, 12, '#9be0be');
+    drawText('A ou +  ·  INICIAR TURNO', W / 2, 251, 15, '#f0c27c', 800);
+    drawText('WASD / analógico move  ·  analógico direito mira', W / 2, 279, 12, '#b5c7bc');
+    drawText('A atira/sincroniza  ·  X recarrega  ·  B corre  ·  L/R arma  ·  − som', W / 2, 299, 12, '#b5c7bc');
     drawText('L/R dificuldade: ' + difficultyNames[prefs.dificuldade] + '  ·  melhor onda ' + prefs.melhorOnda +
       '  ·  recorde ' + prefs.melhorAbates + (prefs.som ? '  ·  SOM ON' : '  ·  SOM OFF'),
       W / 2, 323, 12, '#8da69a');
@@ -875,10 +983,43 @@
       draw();
     }, Math.max(0, confirmUntil - performance.now()));
   }
+  function scheduleArchiveConfirmationExpiry(selected, confirmUntil) {
+    window.setTimeout(function () {
+      if (state !== 'pausa' || !pause.archive || pause.archiveMode !== 'protocols' ||
+          pause.archiveConfirm !== selected || pause.archiveConfirmUntil !== confirmUntil) return;
+      var remaining = confirmUntil - performance.now();
+      if (remaining > 0) {
+        scheduleArchiveConfirmationExpiry(selected, confirmUntil);
+        return;
+      }
+      pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0; draw();
+    }, Math.max(0, confirmUntil - performance.now()));
+  }
+  function chooseProtocol() {
+    var selected = protocolOptions[pause.protocolIndex], now = performance.now();
+    if (pause.archiveConfirm === selected && now < pause.archiveConfirmUntil) {
+      var previous = progress.protocolo;
+      progress.protocolo = selected;
+      if (saveProgress()) pause.protocolStatus = 'PROTOCOLO REGISTRADO · O TURNO SEGUE';
+      else {
+        progress.protocolo = previous;
+        pause.protocolStatus = 'NÃO FOI POSSÍVEL SALVAR O REGISTRO';
+      }
+      pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
+      pause.archiveLockUntil = now + 500; draw(); return;
+    }
+    pause.archiveConfirm = selected; pause.archiveConfirmUntil = now + 2000;
+    pause.archiveLockUntil = now + 500;
+    scheduleArchiveConfirmationExpiry(selected, pause.archiveConfirmUntil); draw();
+  }
   function drawPause() {
     var now = performance.now();
     expirePauseConfirmation(now);
-    if (pause.archive && !pause.follow) { drawArchive(); return; }
+    if (pause.archive && !pause.follow) {
+      if (pause.archiveMode === 'protocols') drawProtocols();
+      else drawArchive();
+      return;
+    }
     ctx.fillStyle = '#040a0cce'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#101d22'; ctx.fillRect(44, 36, W - 88, H - 72);
     ctx.strokeStyle = '#708d80'; ctx.strokeRect(45, 37, W - 90, H - 74);
@@ -891,7 +1032,7 @@
       for (var i = 0; i < pauseOptions.length; i++) {
         var label = pauseOptions[i];
         if (label === 'Som') label += ': ' + (prefs.som ? 'ligado' : 'desligado');
-        if (label === 'Arquivo') label += ' (' + unlockedTransmissions().length + ')';
+        if (label === 'Arquivo') label += ' (' + archiveEntries().length + ')';
         if (pause.confirm === pauseOptions[i] && now < pause.confirmUntil) {
           label = 'A DE NOVO PARA ' + (label === 'Menu' ? 'SAIR' : 'RECOMEÇAR');
         }
@@ -903,7 +1044,7 @@
       if (pause.help) {
         var helpY = Math.max(274, footerY + uiFontSize(12) + 10);
         var helpStep = uiFontSize(12) + 4;
-        drawText('A atira · B corre · X recarrega', W / 2, helpY, 12, '#d8e3d9');
+        drawText('A atira ou sincroniza painel perto', W / 2, helpY, 12, '#d8e3d9');
         drawText('L/R troca arma · analógico direito mira', W / 2, helpY + helpStep, 12, '#d8e3d9');
       }
     }
@@ -911,27 +1052,56 @@
     ctx.textAlign = 'left';
   }
   function drawArchive() {
-    var found = unlockedTransmissions();
+    var found = archiveEntries();
     if (pause.archiveIndex >= found.length) pause.archiveIndex = Math.max(0, found.length - 1);
     ctx.fillStyle = '#040a0cce'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#101d22'; ctx.fillRect(22, 24, W - 44, H - 48);
     ctx.strokeStyle = '#708d80'; ctx.strokeRect(23, 25, W - 46, H - 50);
     drawText('ARQUIVO DE BOREAL', W / 2, 57, 20, '#e8c58a', 800);
-    drawText('↑↓ ler  ·  A/B pausa  ·  + seguir  ·  − som', W / 2, 82, 12, '#a9bcb0');
+    drawText('↑↓ navegar  ·  A/B voltar  ·  + seguir  ·  − som', W / 2, 82, 12, '#a9bcb0');
     ctx.fillStyle = '#34484a'; ctx.fillRect(48, 98, W - 96, 1);
     if (found.length) {
       var entry = found[pause.archiveIndex];
-      drawText('TRANSMISSÃO ' + String(entry.wave).padStart(2, '0') + '  ·  ' +
+      drawText((entry.protocols ? 'ESCOLHA · ' : 'REGISTRO ' + String(entry.wave).padStart(2, '0') + ' · ') +
         (pause.archiveIndex + 1) + '/' + found.length, W / 2, 130, 13, '#9be0be', 800);
       drawText(entry.chapter, W / 2, 166, 17, '#e5bb7b', 800);
       ctx.fillStyle = '#34484a'; ctx.fillRect(72, 185, W - 144, 1);
-      drawText('“' + entry.lines[0] + '”', W / 2, 222, 15, '#e4f0e9');
-      drawText('“' + entry.lines[1] + '”', W / 2, 248, 15, '#e4f0e9');
-      drawText('SINAL RECUPERADO NO SETOR 09', W / 2, 282, 12, '#a9bcb0');
+      drawText('“' + entry.lines[0] + '”', W / 2, 218, 14, '#e4f0e9');
+      drawText('“' + entry.lines[1] + '”', W / 2, 246, 14, '#e4f0e9');
+      drawText(entry.protocols ? 'A · ABRIR PROTOCOLOS' : entry.relay ? 'REGISTRO DE RELÉ SINCRONIZADO' :
+        'SINAL RECUPERADO NO SETOR 09', W / 2, 282, 12, '#a9bcb0');
     } else {
-      drawText('Nenhuma transmissão encontrada.', W / 2, 202, 13, '#d8e3d9');
+      drawText('Nenhum registro encontrado.', W / 2, 202, 13, '#d8e3d9');
     }
-    drawText('A/B voltar à pausa  ·  + fechar e seguir', W / 2, 315, 12, '#a9bcb0');
+    drawText('A abre protocolos ou volta  ·  B volta  ·  + fecha', W / 2, 315, 12, '#a9bcb0');
+    ctx.textAlign = 'left';
+  }
+  function drawProtocols() {
+    var now = performance.now();
+    if (pause.archiveConfirm && now >= pause.archiveConfirmUntil) {
+      pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
+    }
+    ctx.fillStyle = '#040a0cce'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#101d22'; ctx.fillRect(22, 24, W - 44, H - 48);
+    ctx.strokeStyle = '#708d80'; ctx.strokeRect(23, 25, W - 46, H - 50);
+    drawText('PROTOCOLOS DO FAROL', W / 2, 57, 20, '#e8c58a', 800);
+    drawText('REGISTRO NARRATIVO · A PARTIDA CONTINUA', W / 2, 84, 12, '#9be0be', 800);
+    ctx.fillStyle = '#34484a'; ctx.fillRect(48, 99, W - 96, 1);
+    for (var i = 0; i < protocolOptions.length; i++) {
+      var label = protocolLabels[i];
+      if (pause.archiveConfirm === protocolOptions[i] && now < pause.archiveConfirmUntil) {
+        label = 'A DE NOVO: ' + label.toUpperCase() + '?';
+      }
+      drawText((pause.protocolIndex === i ? '›  ' : '   ') + label, W / 2, 151 + i * 43, 16,
+        pause.protocolIndex === i ? '#9be0be' : '#d8e3d9', 800);
+    }
+    var protocol = progress.protocolo;
+    drawText(protocol ? 'ÚLTIMO REGISTRO · ' + (protocol === 'manter' ? 'MANTER O FAROL' : 'ENCERRAR O CICLO') :
+      'SEM PROTOCOLO REGISTRADO', W / 2, 244, 12, '#e5bb7b', 700);
+    if (pause.protocolStatus) drawText(pause.protocolStatus, W / 2, 270, 12, '#a9bcb0');
+    drawText('Manter: saída norte marcada; gravação segue.', W / 2, 291, 12, '#d8e3d9');
+    drawText('Encerrar: alarme não se repete; rota sem farol.', W / 2, 308, 12, '#d8e3d9');
+    drawText('↑↓ escolher · A confirmar 2× · B cancelar · + fechar', W / 2, 329, 12, '#a9bcb0');
     ctx.textAlign = 'left';
   }
   function drawEnd() {
@@ -964,6 +1134,39 @@
   function lineOfSight(distance, angle) {
     var wall = castRay(angle);
     return wall.distance >= distance - 0.22;
+  }
+  function relayAtAim() {
+    if (state !== 'jogando' || !player) return -1;
+    var hit = castRay(player.yaw);
+    if (hit.distance > 2.7) return -1;
+    for (var i = 0; i < relays.length; i++) {
+      if (relays[i].row === hit.row && relays[i].col === hit.col) return i;
+    }
+    return -1;
+  }
+  function tryRelayAction() {
+    var index = relayAtAim();
+    if (index < 0) return false;
+    ignoreAUntilRelease = true;
+    var relay = relays[index];
+    if (progress.reles[index]) return true;
+    if (wave < relay.wave) {
+      message = relay.lockedHint;
+      messageTimer = 2.2;
+      return true;
+    }
+    progress.reles[index] = true;
+    var relaySaved = saveProgress();
+    if (!relaySaved) {
+      progress.reles[index] = false;
+      message = 'NÃO FOI POSSÍVEL SALVAR O RELÉ';
+    } else {
+      message = relay.label + ' SINCRONIZADO · ARQUIVO';
+      sound('pickup');
+    }
+    messageTimer = 2.4;
+    draw();
+    return true;
   }
   function hitEnemy(angle, damage) {
     var target = null, nearest = 999;
@@ -1035,12 +1238,15 @@
     if (state !== 'jogando' && state !== 'pausa') return;
     state = 'pausa'; pause.option = 0; pause.confirm = ''; pause.confirmUntil = 0;
     pause.follow = !!follow; pause.help = false; pause.archive = false;
+    pause.archiveMode = 'records'; pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
+    pause.archiveLockUntil = 0;
     releaseAll(); stopLoop(); syncAudio(); saveSessionState(); draw();
   }
   function closePause() {
     if (state !== 'pausa' || pause.follow) return;
     state = 'jogando'; pause.confirm = ''; pause.confirmUntil = 0; pause.help = false;
-    pause.archive = false; ignoreAUntilRelease = !!held.a;
+    pause.archive = false; pause.archiveMode = 'records'; pause.archiveConfirm = '';
+    pause.archiveConfirmUntil = 0; pause.archiveLockUntil = 0; ignoreAUntilRelease = !!held.a;
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function choosePause() {
@@ -1050,7 +1256,16 @@
     if (selected === 'Som') { toggleSound(); return; }
     if (selected === 'Ajuda') { pause.help = true; draw(); return; }
     if (selected === 'Arquivo') {
-      pause.help = false; pause.archiveIndex = Math.max(0, unlockedTransmissions().length - 1);
+      var entries = archiveEntries();
+      pause.help = false;
+      pause.archiveIndex = 0;
+      for (var archiveIndex = 0; archiveIndex < entries.length; archiveIndex++) {
+        if (entries[archiveIndex].protocols) break;
+        if (!entries[archiveIndex].relay) pause.archiveIndex = archiveIndex;
+      }
+      pause.archiveMode = 'records'; pause.archiveLockUntil = 0;
+      pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
+      pause.protocolIndex = progress.protocolo === 'encerrar' ? 1 : 0; pause.protocolStatus = '';
       pause.archive = true; draw(); return;
     }
     if (pause.confirm === selected && now < pause.confirmUntil) {
@@ -1095,14 +1310,32 @@
         return;
       }
       if (pause.archive) {
-        var archiveCount = unlockedTransmissions().length;
+        var archiveNow = performance.now();
+        if (archiveNow < pause.archiveLockUntil) return;
+        if (name === 'start') { closePause(); return; }
+        if (pause.archiveMode === 'protocols') {
+          if (name === 'up' || name === 'down') {
+            pause.protocolIndex = (pause.protocolIndex + (name === 'up' ? protocolOptions.length - 1 : 1)) %
+              protocolOptions.length;
+            pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0; pause.protocolStatus = ''; draw();
+          } else if (name === 'b') {
+            pause.archiveMode = 'records'; pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
+            pause.archiveLockUntil = archiveNow + 500; draw();
+          } else if (name === 'a') chooseProtocol();
+          return;
+        }
+        var entries = archiveEntries(), archiveCount = entries.length;
         if (name === 'up' && archiveCount) {
           pause.archiveIndex = (pause.archiveIndex + archiveCount - 1) % archiveCount; draw();
         } else if (name === 'down' && archiveCount) {
           pause.archiveIndex = (pause.archiveIndex + 1) % archiveCount; draw();
+        } else if (name === 'a' && archiveCount && entries[pause.archiveIndex].protocols) {
+          pause.archiveMode = 'protocols'; pause.protocolIndex = progress.protocolo === 'encerrar' ? 1 : 0;
+          pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0; pause.protocolStatus = '';
+          pause.archiveLockUntil = archiveNow + 500; draw();
         } else if (name === 'a' || name === 'b') {
-          pause.archive = false; draw();
-        } else if (name === 'start') closePause();
+          pause.archive = false; pause.archiveMode = 'records'; draw();
+        }
         return;
       }
       if (name === 'up') {
@@ -1118,7 +1351,9 @@
     }
     if (state !== 'jogando') return;
     if (name === 'start') { openPause(false); return; }
-    if (name === 'a') shoot();
+    if (name === 'a') {
+      if (!tryRelayAction()) shoot();
+    }
     else if (name === 'x') reloadWeapon();
     else if (name === 'l') cycleWeapon(-1);
     else if (name === 'r' || name === 'y') cycleWeapon(1);
@@ -1126,7 +1361,8 @@
   var gameOverLock = 0;
   function closeFollowPause() {
     if (state !== 'pausa' || !pause.follow) return;
-    pause.follow = false; pause.archive = false; state = 'jogando'; ignoreAUntilRelease = !!held.a;
+    pause.follow = false; pause.archive = false; pause.archiveMode = 'records';
+    pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0; state = 'jogando'; ignoreAUntilRelease = !!held.a;
     createAudio(); syncAudio(); draw(); startLoop();
   }
   function getMovement() {
@@ -1268,9 +1504,10 @@
     },
     resumeSession: function () {
       var saved = readJson(SAVE_KEY);
-      if (saved && saved.versao === 1 && saved.modo === 'jogando') {
+      var compatibleSave = saved && (saved.versao === 1 || saved.versao === 2);
+      if (compatibleSave && saved.modo === 'jogando') {
         if (!restoreGame(saved.jogo)) { state = 'menu'; player = null; draw(); return false; }
-      } else if (saved && saved.versao === 1 && saved.modo === 'fim') {
+      } else if (compatibleSave && saved.modo === 'fim') {
         state = 'menu'; player = null;
         wave = finiteNumber(saved.wave, 0, 0, 999); kills = finiteNumber(saved.kills, 0, 0, 999999);
         draw();
