@@ -51,7 +51,7 @@
   var scale = 1, offsetX = 0, offsetY = 0, pixelRatio = 1;
   var state = 'menu', player = null, wave = 0, kills = 0, seconds = 0;
   var spawnLeft = 0, spawnTimer = 0, waveDelay = 0, bannerTimer = 0;
-  var enemies = [], pickups = [], sparks = [], sprites = [], dust = [];
+  var enemies = [], pickups = [], sparks = [], sprites = [], dust = [], floorMarks = [];
   var zBuffer = new Float32Array(COLS), rayHit = { distance: 0, tile: 1, side: 0, u: 0 };
   var held = Object.create(null), leftAxis = { x: 0, y: 0 }, rightAxis = { x: 0, y: 0 };
   var movementInput = { x: 0, y: 0 }, cameraState = { horizon: 0, focal: 0 };
@@ -131,6 +131,20 @@
   function isWall(x, y) {
     var mx = Math.floor(x), my = Math.floor(y);
     return my < 0 || my >= MAP.length || mx < 0 || mx >= MAP[0].length || MAP[my][mx] !== '0';
+  }
+  for (var markIndex = 0; markIndex < 22; markIndex++) {
+    var markX = 1.3, markY = 1.3, markAttempts = 0;
+    do {
+      markX = 1.3 + random() * 13.4; markY = 1.3 + random() * 13.4;
+      markAttempts++;
+    } while (isWall(markX, markY) && markAttempts < 18);
+    if (!isWall(markX, markY)) {
+      floorMarks.push({
+        x: markX, y: markY, angle: random() * Math.PI,
+        length: 0.08 + random() * 0.22, width: 0.012 + random() * 0.018,
+        type: markIndex % 4
+      });
+    }
   }
   function canStand(x, y, radius) {
     var minX = Math.floor(x - radius), maxX = Math.floor(x + radius);
@@ -244,6 +258,25 @@
     for (var x = 16; x < 54; x += 12) t.fillRect(x, 15, 1, 28);
     t.fillStyle = kind === 2 ? '#a5ebc8' : kind === 3 ? '#f4b66e' : '#a6d6c8';
     t.fillRect(7, 50, 50, 2); t.fillRect(7, 54, 9, 3); t.fillRect(19, 54, 4, 3);
+    t.fillStyle = '#0d1a20'; t.fillRect(45, 16, 9, 22);
+    t.fillStyle = '#718783';
+    for (var vent = 0; vent < 5; vent++) t.fillRect(47, 18 + vent * 4, 5, 1);
+    t.fillStyle = '#91a69a';
+    t.beginPath(); t.arc(9, 13, 1.5, 0, Math.PI * 2); t.fill();
+    t.beginPath(); t.arc(55, 47, 1.5, 0, Math.PI * 2); t.fill();
+    if (kind === 2) {
+      t.fillStyle = '#78b99c'; t.globalAlpha = 0.65;
+      t.fillRect(23, 22, 2, 17); t.fillRect(27, 28, 1, 10); t.globalAlpha = 1;
+    } else if (kind === 3) {
+      t.fillStyle = '#171d1d'; t.fillRect(30, 53, 23, 5);
+      t.fillStyle = '#e8a65e';
+      for (var stripe = 0; stripe < 4; stripe++) {
+        t.beginPath(); t.moveTo(31 + stripe * 7, 53); t.lineTo(35 + stripe * 7, 53);
+        t.lineTo(32 + stripe * 7, 58); t.lineTo(28 + stripe * 7, 58); t.closePath(); t.fill();
+      }
+    } else {
+      t.fillStyle = '#71807b'; t.fillRect(24, 52, 2, 5); t.fillRect(28, 52, 1, 5);
+    }
     t.fillStyle = '#111c23'; t.fillRect(0, 0, 64, 3); t.fillRect(0, 61, 64, 3);
     t.fillStyle = '#687b78';
     for (var i = 0; i < 8; i++) {
@@ -516,13 +549,44 @@
         ctx.globalAlpha = shade; ctx.fillStyle = '#061017'; ctx.fillRect(screenX, top, STRIP + 1, height); ctx.globalAlpha = 1;
       }
       if (hit.u < 0.035 || hit.u > 0.965) {
-        ctx.globalAlpha = Math.max(0.05, 0.24 - distance * 0.012);
+        ctx.globalAlpha = Math.max(0.05, 0.24 - distance * 0.012) *
+          (0.9 + Math.sin(seconds * 1.7 + hit.tile * 0.8) * 0.1);
         ctx.fillStyle = hit.tile === 3 ? '#e9a963' : '#99d9c5';
         ctx.fillRect(screenX, top, 1, height); ctx.globalAlpha = 1;
       }
     }
     cameraState.horizon = horizon; cameraState.focal = focal;
+    drawFloorMarks(cameraState);
     return cameraState;
+  }
+  function drawFloorMarks(camera) {
+    for (var i = 0; i < floorMarks.length; i++) {
+      var mark = floorMarks[i], dx = mark.x - player.x, dy = mark.y - player.y;
+      var angle = normalizeAngle(Math.atan2(dy, dx) - player.yaw), distance = Math.hypot(dx, dy);
+      if (distance < 0.25 || Math.abs(angle) > FOV * 0.54) continue;
+      var screenX = W * 0.5 + Math.tan(angle) * camera.focal;
+      if (screenX < -5 || screenX > W + 5) continue;
+      var column = Math.max(0, Math.min(COLS - 1, Math.floor(screenX / STRIP)));
+      if (zBuffer[column] < distance - 0.12) continue;
+      var size = camera.focal * mark.length / distance;
+      if (size < 1) continue;
+      var screenY = camera.horizon + camera.focal * 0.44 / distance;
+      ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(mark.angle - player.yaw);
+      ctx.globalAlpha = Math.max(0.08, 0.34 - distance * 0.025);
+      ctx.fillStyle = mark.type === 0 ? '#53625b' : mark.type === 1 ? '#101b1d' : '#758277';
+      if (mark.type === 3) {
+        ctx.beginPath(); ctx.ellipse(0, 0, size * 0.65, Math.max(1, size * 0.16), 0, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillRect(-size * 0.5, -Math.max(0.5, size * mark.width), size,
+          Math.max(1, size * mark.width * 2));
+        if (mark.type === 0) {
+          ctx.fillStyle = '#9b825e'; ctx.globalAlpha *= 0.55;
+          ctx.fillRect(-size * 0.34, -0.5, size * 0.16, 1);
+        }
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
   function drawCreature(e, camera) {
     var dx = e.x - player.x, dy = e.y - player.y;
@@ -549,6 +613,11 @@
     ctx.strokeStyle = e.type ? '#7c684a' : '#405f58'; ctx.lineWidth = 6;
     ctx.beginPath(); ctx.moveTo(12, 31); ctx.lineTo(5, 43); ctx.moveTo(32, 31); ctx.lineTo(38, 44); ctx.stroke();
     ctx.fillStyle = e.type ? '#665843' : '#39524c'; ctx.beginPath(); ctx.ellipse(22, 21, 11, 13, 0, 0, Math.PI * 2); ctx.fill();
+    if (e.type) {
+      ctx.strokeStyle = '#b28a5b'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(15, 14); ctx.lineTo(11, 7); ctx.moveTo(29, 14); ctx.lineTo(33, 7); ctx.stroke();
+      ctx.fillStyle = '#d9a76a'; ctx.fillRect(19, 25, 6, 2);
+    }
     ctx.fillStyle = e.type ? '#f3b46c' : '#9fffd6';
     ctx.fillRect(15, 19, 5, 2); ctx.fillRect(25, 19, 5, 2);
     ctx.fillStyle = '#152322'; ctx.fillRect(18, 25, 8, 2);
@@ -585,7 +654,7 @@
       var sx = W / 2 + Math.tan(angle) * (W / (2 * Math.tan(FOV / 2)));
       var col = Math.max(0, Math.min(COLS - 1, Math.floor(sx / STRIP)));
       if (zBuffer[col] < dist - 0.1) continue;
-      var sy = H * 0.455 + W * 0.2 / dist;
+      var sy = cameraState.horizon + cameraState.focal * 0.2 / dist;
       ctx.globalAlpha = Math.max(0, s.life / s.maxLife);
       ctx.fillStyle = s.color; ctx.fillRect(sx, sy, s.size, s.size);
     }
@@ -1135,8 +1204,9 @@
       if (saved && saved.versao === 1 && saved.modo === 'jogando') {
         if (!restoreGame(saved.jogo)) { state = 'menu'; player = null; draw(); return false; }
       } else if (saved && saved.versao === 1 && saved.modo === 'fim') {
-        state = 'fim'; wave = finiteNumber(saved.wave, 0, 0, 999); kills = finiteNumber(saved.kills, 0, 0, 999999);
-        gameOverLock = performance.now() + 500; draw();
+        state = 'menu'; player = null;
+        wave = finiteNumber(saved.wave, 0, 0, 999); kills = finiteNumber(saved.kills, 0, 0, 999999);
+        draw();
       } else {
         state = 'menu'; player = null; draw();
       }
