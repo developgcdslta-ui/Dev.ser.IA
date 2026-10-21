@@ -84,6 +84,7 @@
     { wave: 21, chapter: 'CAP. 08 · ROTA NORTE', short: 'ROTA NORTE',
       lines: ['O farol mantém marcada a saída norte.', 'O protocolo fica no Arquivo; o turno continua.'] }
   ];
+  var storyChapters = transmissions.concat(laterChapters);
   var relays = [
     { row: 2, col: 4, wave: 1, label: 'RELÉ 01', readyHint: 'A SINCRONIZA · RELÉ 01',
       lockedHint: 'RELÉ 01 · LIBERA NA ONDA 01', syncedHint: 'RELÉ 01 · REGISTRO NO ARQUIVO',
@@ -417,9 +418,9 @@
     }
   }
   function currentChapter() {
-    var chapter = transmissions[0];
-    for (var i = 0; i < transmissions.length; i++) {
-      if (wave >= transmissions[i].wave) chapter = transmissions[i];
+    var chapter = storyChapters[0];
+    for (var i = 0; i < storyChapters.length; i++) {
+      if (wave >= storyChapters[i].wave) chapter = storyChapters[i];
     }
     return chapter;
   }
@@ -855,7 +856,7 @@
       ctx.fillStyle = '#071318c9'; ctx.fillRect(68, H * 0.25, W - 136, 42);
       ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b'; ctx.font = '800 ' + uiFontSize(14) + 'px system-ui';
       ctx.fillText('ONDA ' + String(wave).padStart(2, '0') + '  ·  CAP. ' +
-        String(transmissions.indexOf(currentChapter()) + 1).padStart(2, '0') + ' · ' + currentChapter().short,
+        String(storyChapters.indexOf(currentChapter()) + 1).padStart(2, '0') + ' · ' + currentChapter().short,
         W / 2, H * 0.25 + 26, W - 148);
       ctx.globalAlpha = 1;
     }
@@ -1263,7 +1264,7 @@
         if (entries[archiveIndex].protocols) break;
         if (!entries[archiveIndex].relay) pause.archiveIndex = archiveIndex;
       }
-      pause.archiveMode = 'records'; pause.archiveLockUntil = 0;
+      pause.archiveMode = 'records'; pause.archiveLockUntil = now + 500;
       pause.archiveConfirm = ''; pause.archiveConfirmUntil = 0;
       pause.protocolIndex = progress.protocolo === 'encerrar' ? 1 : 0; pause.protocolStatus = '';
       pause.archive = true; draw(); return;
@@ -1500,18 +1501,19 @@
     },
     saveSession: function () {
       var saved = saveSessionState(); savePrefs();
-      return { exact: saved, summary: saveSummary() };
+      return { exact: !!saved && (state === 'jogando' || state === 'pausa'), summary: saveSummary() };
     },
     resumeSession: function () {
       var saved = readJson(SAVE_KEY);
       var compatibleSave = saved && (saved.versao === 1 || saved.versao === 2);
+      if (!compatibleSave || (saved.modo !== 'jogando' && saved.modo !== 'fim' && saved.modo !== 'menu')) return false;
       if (compatibleSave && saved.modo === 'jogando') {
         if (!restoreGame(saved.jogo)) { state = 'menu'; player = null; draw(); return false; }
       } else if (compatibleSave && saved.modo === 'fim') {
         state = 'menu'; player = null;
         wave = finiteNumber(saved.wave, 0, 0, 999); kills = finiteNumber(saved.kills, 0, 0, 999999);
         draw();
-      } else {
+      } else if (saved.modo === 'menu') {
         state = 'menu'; player = null; draw();
       }
       return true;
