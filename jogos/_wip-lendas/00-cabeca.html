@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Lendas do Eclipse</title>
+<!--
+  LENDAS DO ECLIPSE · luta 3D para o Console Pulsy.
+  Tudo está neste arquivo, sem rede e sem arquivos externos:
+    • motor 3D próprio em WebGL (malhas geradas por código, esqueleto com animação por poses,
+      contorno "cel shading", câmera dinâmica, partículas e cenários);
+    • motor de luta por quadros (60 qps fixos): golpes, combos, bloqueio, habilidades e ultimates;
+    • IA com três dificuldades, modo História com diálogos e Luta Livre;
+    • som por WebAudio (efeitos e música gerados no código);
+    • saves só em localStorage (partida separada de preferências e recordes).
+  Controles: veja "Como jogar" no menu. O contrato window.PulsyGame fica no fim do script.
+-->
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; color: #f3ead2;
+    font-family: system-ui, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent; }
+  canvas { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; display: block; }
+  #ui { pointer-events: none; }
+  /* Controles de toque: só aparecem fora do Console (navegador / chat). */
+  .toque { position: fixed; inset: 0; display: none; pointer-events: none; }
+  .toque.visivel { display: block; }
+  .toque button { position: absolute; pointer-events: auto; width: 42px; height: 42px; border-radius: 50%;
+    border: 2px solid #d4af37; background: #1a1710aa; color: #f3ead2; font: 700 15px system-ui; padding: 0;
+    touch-action: none; opacity: .62; }
+  .toque button.on { background: #d4af37cc; color: #000; opacity: .95; }
+  .toque .ombro { width: 54px; height: 30px; border-radius: 10px; top: 4px; font-size: 13px; }
+  .toque .mini { width: 34px; height: 26px; border-radius: 8px; top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<canvas id="cena" aria-label="Lendas do Eclipse: cena em 3D"></canvas>
+<canvas id="ui" aria-hidden="true"></canvas>
+<div class="toque" id="toque" data-pulsy-touch-controls>
+  <button data-pulsy-button="l" class="ombro" style="left:4px" aria-label="L">L</button>
+  <button data-pulsy-button="select" class="mini" style="left:68px" aria-label="Som">−</button>
+  <button data-pulsy-button="start" class="mini" style="right:68px" aria-label="Pausar">+</button>
+  <button data-pulsy-button="r" class="ombro" style="right:4px" aria-label="R">R</button>
+  <button data-pulsy-button="up" style="left:48px;bottom:98px" aria-label="Cima">▲</button>
+  <button data-pulsy-button="left" style="left:6px;bottom:56px" aria-label="Esquerda">◀</button>
+  <button data-pulsy-button="right" style="left:90px;bottom:56px" aria-label="Direita">▶</button>
+  <button data-pulsy-button="down" style="left:48px;bottom:14px" aria-label="Baixo">▼</button>
+  <button data-pulsy-button="x" style="right:48px;bottom:98px" aria-label="X">X</button>
+  <button data-pulsy-button="y" style="right:90px;bottom:56px" aria-label="Y">Y</button>
+  <button data-pulsy-button="a" style="right:6px;bottom:56px" aria-label="A">A</button>
+  <button data-pulsy-button="b" style="right:48px;bottom:14px" aria-label="B">B</button>
+</div>
+<script>
