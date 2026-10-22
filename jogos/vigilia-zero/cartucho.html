@@ -989,8 +989,6 @@
       var radioLine1Y = radioTitleY + radioLineSize + 2;
       var radioLine2Y = radioLine1Y + radioLineSize + 2;
       ctx.globalAlpha = Math.min(1, transmissionTimer, (7 - transmissionTimer) * 2 + 0.35);
-      ctx.fillStyle = '#061015d9';
-      ctx.fillRect(radioX, radioY, radioWidth, radioLine2Y - radioY + 5);
       ctx.textAlign = 'center'; ctx.fillStyle = '#e5bb7b';
       ctx.font = '800 ' + radioTitleSize + 'px system-ui';
       ctx.fillText(transmission.short + ' · ONDA ' + String(transmission.wave).padStart(2, '0'),
@@ -1002,8 +1000,20 @@
     }
     ctx.textAlign = 'left';
   }
+  function drawTransmissionBackdrop() {
+    if (activeTransmission < 0 || transmissionTimer <= 0) return;
+    var radioY = 90, radioWidth = 240, radioTitleSize = uiFontSize(12), radioLineSize = uiFontSize(13);
+    var radioTitleY = radioY + radioTitleSize;
+    var radioLine1Y = radioTitleY + radioLineSize + 2;
+    var radioLine2Y = radioLine1Y + radioLineSize + 2;
+    ctx.globalAlpha = Math.min(1, transmissionTimer, (7 - transmissionTimer) * 2 + 0.35);
+    ctx.fillStyle = '#061015d9';
+    ctx.fillRect(8, radioY, radioWidth, radioLine2Y - radioY + 5);
+    ctx.globalAlpha = 1;
+  }
   function renderGame() {
     var camera = drawWorld();
+    drawTransmissionBackdrop();
     sprites.length = 0;
     for (var i = 0; i < enemies.length; i++) {
       var e = enemies[i]; e.renderDistance = Math.hypot(e.x - player.x, e.y - player.y); sprites.push(e);
